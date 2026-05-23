@@ -320,6 +320,9 @@ def init_db() -> None:
                 exit_code INTEGER,
                 stop_reason TEXT,
                 last_error TEXT,
+                auto_restart INTEGER NOT NULL DEFAULT 0,
+                max_retries INTEGER NOT NULL DEFAULT 3,
+                retry_count INTEGER NOT NULL DEFAULT 0,
                 archived_at TEXT,
                 FOREIGN KEY(channel_id) REFERENCES channels(id),
                 FOREIGN KEY(audio_playlist_id) REFERENCES audio_playlists(id),
@@ -376,6 +379,12 @@ def init_db() -> None:
             conn.execute("ALTER TABLE live_jobs ADD COLUMN stop_reason TEXT")
         if "last_error" not in columns:
             conn.execute("ALTER TABLE live_jobs ADD COLUMN last_error TEXT")
+        if "auto_restart" not in columns:
+            conn.execute("ALTER TABLE live_jobs ADD COLUMN auto_restart INTEGER NOT NULL DEFAULT 0")
+        if "max_retries" not in columns:
+            conn.execute("ALTER TABLE live_jobs ADD COLUMN max_retries INTEGER NOT NULL DEFAULT 3")
+        if "retry_count" not in columns:
+            conn.execute("ALTER TABLE live_jobs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0")
         if "archived_at" not in columns:
             conn.execute("ALTER TABLE live_jobs ADD COLUMN archived_at TEXT")
         playlist_columns = {row["name"] for row in conn.execute("PRAGMA table_info(audio_playlists)").fetchall()}
@@ -1233,6 +1242,7 @@ def start_job(conn: sqlite3.Connection, job_id: int) -> tuple[bool, str]:
             UPDATE live_jobs
             SET status = 'running', pid = ?, started_at = ?, stopped_at = NULL,
                 expected_end_at = ?, exit_code = NULL, stop_reason = NULL,
+                retry_count = CASE WHEN status = 'error' THEN retry_count ELSE 0 END,
                 last_error = NULL, updated_at = ?
             WHERE id = ?
             """,
@@ -1297,6 +1307,46 @@ def update_job_error(conn: sqlite3.Connection, job_id: int, message: str, exit_c
     )
     conn.commit()
 
+def handle_unexpected_process_exit(conn: sqlite3.Connection, job_id: int, exit_code: int | None = None) -> None:
+    job = get_job(conn, job_id)
+    if not job:
+        return
+    message = "FFmpeg process exited unexpectedly."
+    update_job_error(conn, job_id, message, exit_code)
+    retry_count = int(job.get("retry_count") or 0)
+    max_retries = int(job.get("max_retries") or 3)
+    if not job.get("auto_restart") or retry_count >= max_retries:
+        with log_path(job_id).open("ab") as log_file:
+            log_file.write(f"\n[{dt_to_str(local_now())}] Auto-restart skipped. retry_count={retry_count}, max_retries={max_retries}.\n".encode("utf-8"))
+        return
+
+    next_retry_count = retry_count + 1
+    now = dt_to_str(local_now())
+    conn.execute(
+        """
+        UPDATE live_jobs
+        SET retry_count = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (next_retry_count, now, job_id),
+    )
+    conn.commit()
+    with log_path(job_id).open("ab") as log_file:
+        log_file.write(f"\n[{now}] Auto-restart attempt {next_retry_count}/{max_retries} after unexpected FFmpeg exit.\n".encode("utf-8"))
+    ok, start_message = start_job(conn, job_id)
+    with log_path(job_id).open("ab") as log_file:
+        log_file.write(f"[{dt_to_str(local_now())}] Auto-restart result: {start_message}\n".encode("utf-8"))
+    if not ok:
+        conn.execute(
+            """
+            UPDATE live_jobs
+            SET retry_count = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (next_retry_count, dt_to_str(local_now()), job_id),
+        )
+        conn.commit()
+
 def archive_job(conn: sqlite3.Connection, job_id: int, reason: str = "archived") -> tuple[bool, str]:
     job = get_job(conn, job_id)
     if not job:
@@ -1328,10 +1378,11 @@ def duplicate_job_as_new(conn: sqlite3.Connection, job_id: int) -> tuple[bool, s
         INSERT INTO live_jobs (
             live_name, channel_name, channel_id, video_id, audio_playlist_id, stream_key,
             start_at, end_at, duration_minutes, status, pid, created_at, updated_at,
-            started_at, stopped_at, expected_end_at, exit_code, stop_reason, last_error, archived_at
+            started_at, stopped_at, expected_end_at, exit_code, stop_reason, last_error,
+            auto_restart, max_retries, retry_count, archived_at
         )
         VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, 'stopped', NULL, ?, ?,
-                NULL, NULL, NULL, NULL, NULL, NULL, NULL)
+                NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, 0, NULL)
         """,
         (
             f"{job['live_name']} copy",
@@ -1343,6 +1394,8 @@ def duplicate_job_as_new(conn: sqlite3.Connection, job_id: int) -> tuple[bool, s
             job.get("duration_minutes"),
             now,
             now,
+            job.get("auto_restart") or 0,
+            job.get("max_retries") or 3,
         ),
     )
     conn.commit()
@@ -1416,7 +1469,7 @@ def run_scheduler_once() -> None:
                         reason = "scheduler_end" if job.get("end_at") else "completed_duration"
                         complete_stopped_job(conn, job_id, "done", reason, "FFmpeg process completed.")
                     else:
-                        update_job_error(conn, job_id, "FFmpeg process exited unexpectedly.", exit_code)
+                        handle_unexpected_process_exit(conn, job_id, exit_code)
                 continue
 
             start_at = parse_dt(job.get("start_at"))
@@ -2496,6 +2549,8 @@ def create_job(
     end_at: str | None = Form(None),
     duration_minutes: str | None = Form(None),
     status: str = Form("stopped"),
+    auto_restart: str | None = Form(None),
+    max_retries: str = Form("3"),
     db: sqlite3.Connection = Depends(get_db),
     _: None = Depends(require_admin),
 ):
@@ -2574,15 +2629,20 @@ def create_job(
         duration_value = duration_between_minutes(start_value, end_value)
     if start_value and status == "stopped":
         status = "scheduled"
+    auto_restart_value = 1 if auto_restart else 0
+    try:
+        max_retries_value = max(0, int(max_retries or "3"))
+    except ValueError:
+        max_retries_value = 3
 
     now = dt_to_str(local_now())
     db.execute(
         """
         INSERT INTO live_jobs (
             live_name, channel_name, channel_id, video_id, audio_playlist_id, stream_key, start_at, end_at,
-            duration_minutes, status, created_at, updated_at
+            duration_minutes, status, auto_restart, max_retries, retry_count, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
         """,
         (
             clean_live_name,
@@ -2595,6 +2655,8 @@ def create_job(
             dt_to_str(end_value),
             duration_value,
             status,
+            auto_restart_value,
+            max_retries_value,
             now,
             now,
         ),

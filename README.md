@@ -264,6 +264,8 @@ Deleting live jobs from the Live Jobs tab now archives the job record to History
 
 The `queued` status is useful for preparing a group of jobs before starting them manually or letting scheduled queued jobs start later when their start datetime is reached.
 
+Live jobs can optionally enable `Auto restart if FFmpeg dies`. When enabled, the scheduler watches running FFmpeg PIDs. If a process exits unexpectedly before the expected end time, the app records an error, increments `retry_count`, writes retry messages to the job log, and restarts the job while `retry_count < max_retries`. Manual stops and normal scheduled completion do not trigger auto-restart.
+
 ## System Monitor
 
 The dashboard and Settings tab include a lightweight System Monitor powered by `psutil`.
