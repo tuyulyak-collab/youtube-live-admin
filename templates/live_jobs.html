@@ -33,15 +33,31 @@
             </select>
             <span class="mt-1 block text-xs text-zinc-500">Pilih video yang sudah berhasil di-upload.</span>
           </label>
+          <label class="block sm:col-span-2">
+            <span class="text-sm font-medium text-zinc-300">Prepared audio playlist (optional)</span>
+            <select id="audio-playlist-input" name="audio_playlist_id" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+              <option value="" data-channel-id="">Use video audio / original input</option>
+              {% for playlist in ready_playlists %}
+                <option value="{{ playlist.id }}" data-channel-id="{{ playlist.channel_id }}">{{ playlist.channel_name }} · {{ playlist.name }} · {{ format_seconds(playlist.total_duration_seconds or playlist.item_duration_seconds) }}</option>
+              {% endfor %}
+            </select>
+            <span id="audio-playlist-helper" class="mt-1 block text-xs text-zinc-500">Only ready playlists for the selected channel are shown.</span>
+          </label>
         </div>
       </fieldset>
 
       <fieldset class="border-t border-zinc-800 pt-4">
         <legend class="pr-3 text-sm font-semibold">Koneksi YouTube</legend>
-        <label class="mt-3 block">
+        <div class="mt-3">
           <span class="text-sm font-medium text-zinc-300">YouTube stream key</span>
-          <input id="stream-key-input" name="stream_key" type="password" required autocomplete="off" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
-        </label>
+          <span class="mt-1 flex rounded-md border border-zinc-700 bg-zinc-950 focus-within:border-emerald-500">
+            <input id="stream-key-input" name="stream_key" type="password" required autocomplete="off" class="min-w-0 flex-1 rounded-l-md bg-transparent px-3 py-2 text-sm outline-none">
+            <button type="button" data-secret-toggle data-target="stream-key-input" aria-label="Show stream key" class="flex w-11 items-center justify-center rounded-r-md border-l border-zinc-700 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            </button>
+          </span>
+          <span class="mt-1 block text-xs text-zinc-500">Klik ikon mata untuk melihat atau menyembunyikan stream key.</span>
+        </div>
       </fieldset>
 
       <fieldset class="border-t border-zinc-800 pt-4">
@@ -83,7 +99,12 @@
             <tr>
               <td class="py-3 pr-4 font-medium">{{ job.live_name }}<div class="text-xs font-normal text-zinc-500">Key {{ mask_secret(job.stream_key) }}</div></td>
               <td class="py-3 pr-4">{{ job.display_channel_name or job.channel_name }}</td>
-              <td class="max-w-xs truncate py-3 pr-4 text-zinc-400">{{ job.video_original_name }}</td>
+              <td class="max-w-xs truncate py-3 pr-4 text-zinc-400">
+                {{ job.video_original_name }}
+                {% if job.audio_playlist_name %}
+                  <div class="mt-1 text-xs text-emerald-300">Audio: {{ job.audio_playlist_name }}</div>
+                {% endif %}
+              </td>
               <td class="py-3 pr-4"><span class="rounded-full bg-zinc-800 px-2 py-1 text-xs">{{ job.status }}</span>{% if job.last_error %}<div class="mt-1 max-w-xs text-xs text-red-300">{{ job.last_error }}</div>{% endif %}</td>
               <td class="py-3 pr-4 text-xs text-zinc-400">{% for line in job_schedule_lines(job) %}<div>{{ line }}</div>{% endfor %}</td>
               <td class="py-3">
@@ -107,6 +128,8 @@
   const createJobButton = document.getElementById("create-job-button");
   const channelIdInput = document.getElementById("channel-id-input");
   const streamKeyInput = document.getElementById("stream-key-input");
+  const audioPlaylistInput = document.getElementById("audio-playlist-input");
+  const audioPlaylistHelper = document.getElementById("audio-playlist-helper");
   const requiredCreateJobFields = [document.getElementById("live-name-input"), channelIdInput, streamKeyInput, document.getElementById("video-id-input")].filter(Boolean);
   const scheduleModeInputs = Array.from(document.querySelectorAll("input[name='schedule_mode']"));
   const scheduleModeHelper = document.getElementById("schedule-mode-helper");
@@ -124,15 +147,28 @@
   function formatDuration(totalMinutes) { const safeMinutes = Math.max(0, Math.floor(totalMinutes)); const days = Math.floor(safeMinutes / 1440); const hours = Math.floor((safeMinutes % 1440) / 60); const minutes = safeMinutes % 60; const parts = []; if (days > 0) { parts.push(`${days} hari`); parts.push(`${hours} jam`); } else if (hours > 0) { parts.push(`${hours} jam`); } if (minutes > 0 || parts.length === 0) parts.push(`${minutes} menit`); return parts.join(" "); }
   function formatIndonesianDateTime(date) { const months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]; return `${String(date.getDate()).padStart(2, "0")} ${months[date.getMonth()]} ${date.getFullYear()} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`; }
   function fillDefaultStreamKey(force = false) { if (!channelIdInput || !streamKeyInput) return; const selected = channelIdInput.options[channelIdInput.selectedIndex]; const defaultStreamKey = selected ? selected.dataset.streamKey || "" : ""; if (defaultStreamKey && (force || !streamKeyInput.value.trim())) { streamKeyInput.value = defaultStreamKey; lastAutoFilledStreamKey = defaultStreamKey; } else if (!defaultStreamKey && streamKeyInput.value === lastAutoFilledStreamKey) { streamKeyInput.value = ""; lastAutoFilledStreamKey = ""; } }
+  function filterAudioPlaylists() { if (!channelIdInput || !audioPlaylistInput) return; const channelId = channelIdInput.value; let visibleCount = 0; Array.from(audioPlaylistInput.options).forEach((option) => { const optionChannelId = option.dataset.channelId || ""; const visible = option.value === "" || optionChannelId === channelId; option.hidden = !visible; option.disabled = !visible; if (visible && option.value) visibleCount += 1; }); const selected = audioPlaylistInput.options[audioPlaylistInput.selectedIndex]; if (selected && selected.disabled) audioPlaylistInput.value = ""; if (audioPlaylistHelper) audioPlaylistHelper.textContent = visibleCount ? "Ready playlists for this channel are available." : "No ready playlist for this channel yet."; }
   function setScheduleFieldVisibility(element, input, visible, required = visible) { if (!element || !input) return; element.classList.toggle("hidden", !visible); element.classList.toggle("block", visible); input.disabled = !visible; input.required = required; }
   function updateScheduleFields() { const mode = selectedScheduleMode(); setScheduleFieldVisibility(scheduleStartField, scheduleStartInput, mode !== "manual_now", mode !== "manual_now"); setScheduleFieldVisibility(scheduleEndField, scheduleEndInput, mode === "start_end", mode === "start_end"); setScheduleFieldVisibility(scheduleDurationField, scheduleDurationInput, mode !== "start_end", mode === "start_duration"); if (mode !== "start_end" && scheduleEndInput) scheduleEndInput.value = ""; if (mode === "start_end" && scheduleDurationInput) scheduleDurationInput.value = ""; if (mode === "manual_now" && scheduleStartInput) scheduleStartInput.value = ""; if (scheduleModeHelper) scheduleModeHelper.textContent = {manual_now: "Live bisa dimulai manual dengan tombol Start.", start_end: "Isi start datetime dan end datetime. Durasi akan dihitung otomatis.", start_duration: "Isi start datetime dan duration minutes. Waktu selesai akan dihitung otomatis."}[mode]; }
   function updateSchedulePreview() { const mode = selectedScheduleMode(); const startDate = parseLocalDateTime(scheduleStartInput && scheduleStartInput.value); const endDate = parseLocalDateTime(scheduleEndInput && scheduleEndInput.value); const durationValue = scheduleDurationInput && scheduleDurationInput.value ? Number(scheduleDurationInput.value) : null; let previewText = ""; let validationText = ""; if (mode === "start_end" && startDate && endDate) { const diffMinutes = Math.floor((endDate.getTime() - startDate.getTime()) / 60000); if (diffMinutes > 0) previewText = `Durasi otomatis: ${formatDuration(diffMinutes)}`; else validationText = "End datetime harus setelah start datetime."; } else if (mode === "start_duration") { if (durationValue !== null && durationValue <= 0) validationText = "Duration minutes harus lebih dari 0."; else if (startDate && durationValue > 0) previewText = `Selesai otomatis: ${formatIndonesianDateTime(new Date(startDate.getTime() + durationValue * 60000))}`; } if (schedulePreview) { schedulePreview.textContent = previewText; schedulePreview.classList.toggle("hidden", !previewText); } if (scheduleValidationHelper) { scheduleValidationHelper.textContent = validationText; scheduleValidationHelper.classList.toggle("hidden", !validationText); } return validationText === ""; }
   function isScheduleValid() { const mode = selectedScheduleMode(); const startDate = parseLocalDateTime(scheduleStartInput && scheduleStartInput.value); const endDate = parseLocalDateTime(scheduleEndInput && scheduleEndInput.value); const durationValue = scheduleDurationInput && scheduleDurationInput.value ? Number(scheduleDurationInput.value) : null; if (mode === "start_end") return Boolean(startDate && endDate && endDate > startDate); if (mode === "start_duration") return Boolean(startDate && durationValue > 0); return true; }
   function updateCreateJobHelper() { updateScheduleFields(); updateSchedulePreview(); const isMissingBase = requiredCreateJobFields.some((field) => !field.value.trim()); createJobButton.disabled = isMissingBase || !isScheduleValid(); createJobHelper.classList.toggle("hidden", !isMissingBase); }
+  function setupSecretToggles() {
+    document.querySelectorAll("[data-secret-toggle]").forEach((button) => {
+      const target = document.getElementById(button.dataset.target);
+      if (!target) return;
+      button.addEventListener("click", () => {
+        const isVisible = target.type === "text";
+        target.type = isVisible ? "password" : "text";
+        button.setAttribute("aria-label", isVisible ? "Show stream key" : "Hide stream key");
+        button.classList.toggle("text-emerald-300", !isVisible);
+      });
+    });
+  }
   requiredCreateJobFields.forEach((field) => { field.addEventListener("input", updateCreateJobHelper); field.addEventListener("change", updateCreateJobHelper); });
-  if (channelIdInput) channelIdInput.addEventListener("change", () => { fillDefaultStreamKey(true); updateCreateJobHelper(); });
+  if (channelIdInput) channelIdInput.addEventListener("change", () => { fillDefaultStreamKey(true); filterAudioPlaylists(); updateCreateJobHelper(); });
   scheduleModeInputs.forEach((field) => field.addEventListener("change", updateCreateJobHelper));
   [scheduleStartInput, scheduleEndInput, scheduleDurationInput].filter(Boolean).forEach((field) => { field.addEventListener("input", updateCreateJobHelper); field.addEventListener("change", updateCreateJobHelper); });
-  fillDefaultStreamKey(false); updateCreateJobHelper();
+  setupSecretToggles(); fillDefaultStreamKey(false); filterAudioPlaylists(); updateCreateJobHelper();
 </script>
 {% endblock %}

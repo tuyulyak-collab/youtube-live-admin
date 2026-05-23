@@ -1,5 +1,6 @@
 import asyncio
 import os
+import random
 import re
 import secrets
 import shutil
@@ -13,7 +14,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -21,6 +22,8 @@ from starlette.middleware.sessions import SessionMiddleware
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 VIDEO_DIR = BASE_DIR / "uploads" / "videos"
+AUDIO_DIR = BASE_DIR / "uploads" / "audio"
+READY_DIR = BASE_DIR / "uploads" / "ready"
 LOG_DIR = BASE_DIR / "uploads" / "logs"
 DB_PATH = Path(os.getenv("DATABASE_PATH", DATA_DIR / "app.db"))
 
@@ -121,6 +124,12 @@ def safe_filename(filename: str) -> str:
     name = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")
     return name or f"video_{int(local_now().timestamp())}.mp4"
 
+def safe_audio_filename(filename: str) -> str:
+    safe = safe_filename(filename)
+    if Path(safe).suffix.lower() not in {".mp3", ".wav", ".m4a"}:
+        return f"{Path(safe).stem}.mp3"
+    return safe
+
 
 def mask_secret(value: str | None) -> str:
     if not value:
@@ -138,7 +147,7 @@ def mask_log(text: str, stream_key: str | None = None) -> str:
 
 
 def ensure_directories() -> None:
-    for path in (DATA_DIR, VIDEO_DIR, LOG_DIR):
+    for path in (DATA_DIR, VIDEO_DIR, AUDIO_DIR, READY_DIR, LOG_DIR):
         path.mkdir(parents=True, exist_ok=True)
 
 
@@ -179,6 +188,7 @@ def init_db() -> None:
                 channel_name TEXT NOT NULL,
                 channel_id INTEGER,
                 video_id INTEGER NOT NULL,
+                audio_playlist_id INTEGER,
                 stream_key TEXT NOT NULL,
                 start_at TEXT,
                 end_at TEXT,
@@ -191,14 +201,54 @@ def init_db() -> None:
                 stopped_at TEXT,
                 last_error TEXT,
                 FOREIGN KEY(channel_id) REFERENCES channels(id),
+                FOREIGN KEY(audio_playlist_id) REFERENCES audio_playlists(id),
                 FOREIGN KEY(video_id) REFERENCES videos(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS audio_assets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                original_filename TEXT NOT NULL,
+                path TEXT NOT NULL,
+                file_size INTEGER NOT NULL,
+                duration_seconds REAL,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS audio_playlists (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'draft',
+                prepared_audio_path TEXT,
+                total_duration_seconds REAL,
+                last_error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(channel_id) REFERENCES channels(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS audio_playlist_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                playlist_id INTEGER NOT NULL,
+                audio_asset_id INTEGER NOT NULL,
+                sort_order INTEGER NOT NULL,
+                FOREIGN KEY(playlist_id) REFERENCES audio_playlists(id) ON DELETE CASCADE,
+                FOREIGN KEY(audio_asset_id) REFERENCES audio_assets(id)
             );
             """
         )
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(live_jobs)").fetchall()}
         if "channel_id" not in columns:
             conn.execute("ALTER TABLE live_jobs ADD COLUMN channel_id INTEGER")
+        if "audio_playlist_id" not in columns:
+            conn.execute("ALTER TABLE live_jobs ADD COLUMN audio_playlist_id INTEGER")
+        playlist_columns = {row["name"] for row in conn.execute("PRAGMA table_info(audio_playlists)").fetchall()}
+        if "last_error" not in playlist_columns:
+            conn.execute("ALTER TABLE audio_playlists ADD COLUMN last_error TEXT")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_live_jobs_channel_id ON live_jobs(channel_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_live_jobs_audio_playlist_id ON live_jobs(audio_playlist_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_audio_playlist_items_playlist_id ON audio_playlist_items(playlist_id)")
         conn.commit()
 
 
@@ -289,6 +339,103 @@ def ffmpeg_path() -> str | None:
     info = ffmpeg_probe()
     return info["path"] if info["detected"] else None
 
+def configured_ffprobe_path() -> str:
+    configured = os.getenv("FFPROBE_PATH", "").strip().strip("\"'")
+    if configured:
+        return configured
+    ffmpeg_executable = configured_ffmpeg_path()
+    ffmpeg_name = Path(ffmpeg_executable).name.lower()
+    if ffmpeg_name in {"ffmpeg.exe", "ffmpeg"}:
+        sibling = Path(ffmpeg_executable).with_name("ffprobe.exe" if os.name == "nt" else "ffprobe")
+        if sibling.exists():
+            return str(sibling)
+    return shutil.which("ffprobe") or "ffprobe"
+
+def ffprobe_probe(timeout: int = 5) -> dict[str, Any]:
+    executable = configured_ffprobe_path()
+    info: dict[str, Any] = {"detected": False, "path": executable, "version": None, "error": None}
+    try:
+        result = subprocess.run([executable, "-version"], capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        info["error"] = f"FFprobe executable was not found: {executable}"
+        return info
+    except Exception as exc:
+        info["error"] = str(exc)
+        return info
+    output = (result.stdout or result.stderr or "").strip()
+    first_line = output.splitlines()[0] if output else ""
+    if result.returncode == 0:
+        info["detected"] = True
+        info["version"] = first_line or "FFprobe detected"
+    else:
+        info["error"] = first_line or f"ffprobe -version exited with code {result.returncode}"
+    return info
+
+def probe_audio_duration(path: Path) -> float | None:
+    ffprobe_info = ffprobe_probe()
+    if not ffprobe_info["detected"]:
+        return None
+    try:
+        result = subprocess.run(
+            [
+                ffprobe_info["path"],
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if result.returncode != 0:
+            return None
+        return float(result.stdout.strip())
+    except Exception:
+        return None
+
+def format_seconds(seconds: float | int | None) -> str:
+    if seconds in (None, ""):
+        return "-"
+    try:
+        total = int(round(float(seconds)))
+    except (TypeError, ValueError):
+        return "-"
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+def playlist_total_duration(conn: sqlite3.Connection, playlist_id: int) -> float | None:
+    row = conn.execute(
+        """
+        SELECT SUM(COALESCE(audio_assets.duration_seconds, 0)) AS total
+        FROM audio_playlist_items
+        JOIN audio_assets ON audio_assets.id = audio_playlist_items.audio_asset_id
+        WHERE audio_playlist_items.playlist_id = ?
+        """,
+        (playlist_id,),
+    ).fetchone()
+    total = row["total"] if row else None
+    return float(total) if total is not None else None
+
+def live_duration_seconds_for_start(job: dict[str, Any], now: datetime) -> int | None:
+    end_at = parse_dt(job.get("end_at"))
+    if end_at:
+        remaining = int((end_at - now).total_seconds())
+        return remaining if remaining > 0 else None
+    duration = job.get("duration_minutes")
+    if duration:
+        try:
+            return max(1, int(duration) * 60)
+        except (TypeError, ValueError):
+            return None
+    return None
+
 
 def process_exists(pid: int | None) -> bool:
     if not pid:
@@ -336,10 +483,15 @@ def get_job(conn: sqlite3.Connection, job_id: int) -> dict[str, Any] | None:
                channels.name AS channel_table_name,
                channels.handle AS channel_handle,
                channels.is_active AS channel_is_active,
-               COALESCE(channels.name, live_jobs.channel_name) AS display_channel_name
+               COALESCE(channels.name, live_jobs.channel_name) AS display_channel_name,
+               audio_playlists.name AS audio_playlist_name,
+               audio_playlists.status AS audio_playlist_status,
+               audio_playlists.prepared_audio_path AS prepared_audio_path,
+               audio_playlists.total_duration_seconds AS audio_playlist_duration_seconds
         FROM live_jobs
         JOIN videos ON videos.id = live_jobs.video_id
         LEFT JOIN channels ON channels.id = live_jobs.channel_id
+        LEFT JOIN audio_playlists ON audio_playlists.id = live_jobs.audio_playlist_id
         WHERE live_jobs.id = ?
         """,
         (job_id,),
@@ -370,6 +522,13 @@ def latest_log_text(job_id: int, stream_key: str | None = None, max_chars: int =
         return "No FFmpeg log has been written for this job yet."
     text = path.read_text(encoding="utf-8", errors="replace")
     return mask_log(text[-max_chars:], stream_key).strip() or "The log file is empty."
+
+def audio_playlist_log_text(playlist_id: int, max_chars: int = 4000) -> str:
+    path = LOG_DIR / f"audio_playlist_{playlist_id}.log"
+    if not path.exists():
+        return "No prepare log has been written for this playlist yet."
+    text = path.read_text(encoding="utf-8", errors="replace")
+    return text[-max_chars:].strip() or "The log file is empty."
 
 
 def latest_any_log(conn: sqlite3.Connection) -> dict[str, Any] | None:
@@ -412,38 +571,88 @@ def start_job(conn: sqlite3.Connection, job_id: int) -> tuple[bool, str]:
         return False, message
 
     target = f"{YOUTUBE_RTMP_BASE}/{job['stream_key']}"
-    cmd = [
-        ffmpeg_info["path"],
-        "-hide_banner",
-        "-loglevel",
-        "info",
-        "-re",
-        "-stream_loop",
-        "-1",
-        "-i",
-        str(video_path),
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-maxrate",
-        "4500k",
-        "-bufsize",
-        "9000k",
-        "-pix_fmt",
-        "yuv420p",
-        "-g",
-        "50",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "128k",
-        "-ar",
-        "44100",
-        "-f",
-        "flv",
-        target,
-    ]
+    audio_path = Path(job["prepared_audio_path"]) if job.get("prepared_audio_path") else None
+    if job.get("audio_playlist_id"):
+        if job.get("audio_playlist_status") != "ready" or not audio_path:
+            message = "Selected audio playlist is not ready."
+            update_job_error(conn, job_id, message)
+            return False, message
+        if not audio_path.exists():
+            message = f"Prepared audio playlist file does not exist: {audio_path}"
+            update_job_error(conn, job_id, message)
+            return False, message
+
+    if audio_path:
+        duration_seconds = live_duration_seconds_for_start(job, local_now())
+        cmd = [
+            ffmpeg_info["path"],
+            "-hide_banner",
+            "-loglevel",
+            "info",
+            "-re",
+            "-stream_loop",
+            "-1",
+            "-i",
+            str(video_path),
+            "-stream_loop",
+            "-1",
+            "-i",
+            str(audio_path),
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-b:v",
+            "1500k",
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            "50",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+        ]
+        if duration_seconds:
+            cmd.extend(["-t", str(duration_seconds)])
+        cmd.extend(["-f", "flv", target])
+    else:
+        cmd = [
+            ffmpeg_info["path"],
+            "-hide_banner",
+            "-loglevel",
+            "info",
+            "-re",
+            "-stream_loop",
+            "-1",
+            "-i",
+            str(video_path),
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-maxrate",
+            "4500k",
+            "-bufsize",
+            "9000k",
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            "50",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-ar",
+            "44100",
+            "-f",
+            "flv",
+            target,
+        ]
     flags = 0
     if os.name == "nt":
         flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -718,6 +927,331 @@ def delete_channel(
     db.commit()
     return redirect(f"/channels?{urlencode({'message': 'Channel deleted.'})}")
 
+@app.get("/audio-assets/{asset_id}/preview")
+def preview_audio_asset(
+    asset_id: int,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    asset = db.execute("SELECT * FROM audio_assets WHERE id = ?", (asset_id,)).fetchone()
+    if not asset:
+        return Response(status_code=404)
+    path = Path(asset["path"])
+    if not path.exists():
+        return Response(status_code=404)
+    return FileResponse(path)
+
+@app.post("/audio-assets")
+def upload_audio_asset(
+    files: list[UploadFile] | None = File(None),
+    file: UploadFile | None = File(None),
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    selected_files = [item for item in (files or []) if getattr(item, "filename", "")]
+    if file and getattr(file, "filename", ""):
+        selected_files.append(file)
+    total_selected = len(selected_files)
+    if not total_selected:
+        return redirect(f"/audio?{urlencode({'error': 'Select at least one MP3, WAV, or M4A audio file.'})}")
+
+    allowed_suffixes = {".mp3", ".wav", ".m4a"}
+    uploaded_count = 0
+    skipped_names: list[str] = []
+    now = dt_to_str(local_now())
+    for index, upload in enumerate(selected_files, start=1):
+        original_name = upload.filename or ""
+        if Path(original_name).suffix.lower() not in allowed_suffixes:
+            skipped_names.append(f"{original_name or 'unnamed file'} (format tidak didukung)")
+            continue
+        try:
+            filename = f"{datetime.now().strftime('%Y%m%d%H%M%S%f')}_{index}_{safe_audio_filename(original_name)}"
+            target = AUDIO_DIR / filename
+            with target.open("wb") as output:
+                shutil.copyfileobj(upload.file, output)
+            duration_seconds = probe_audio_duration(target)
+            db.execute(
+                """
+                INSERT INTO audio_assets (filename, original_filename, path, file_size, duration_seconds, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (filename, original_name, str(target), target.stat().st_size, duration_seconds, now),
+            )
+            uploaded_count += 1
+        except Exception:
+            skipped_names.append(f"{original_name or 'unnamed file'} (gagal disimpan)")
+    db.commit()
+
+    skipped_count = total_selected - uploaded_count
+    summary = (
+        f"Ringkasan upload: total selected {total_selected}, "
+        f"uploaded successfully {uploaded_count}, skipped/failed {skipped_count}."
+    )
+    if skipped_names:
+        shown = ", ".join(skipped_names[:5])
+        more = f" dan {len(skipped_names) - 5} file lain" if len(skipped_names) > 5 else ""
+        summary = f"{summary} Dilewati/gagal: {shown}{more}."
+    key = "message" if uploaded_count else "error"
+    return redirect(f"/audio?{urlencode({key: summary})}")
+
+@app.post("/audio-assets/{asset_id}/delete")
+def delete_audio_asset(
+    asset_id: int,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    asset = db.execute("SELECT * FROM audio_assets WHERE id = ?", (asset_id,)).fetchone()
+    if not asset:
+        return redirect(f"/audio?{urlencode({'error': 'Audio file was not found.'})}")
+    usage_count = db.execute(
+        "SELECT COUNT(*) FROM audio_playlist_items WHERE audio_asset_id = ?",
+        (asset_id,),
+    ).fetchone()[0]
+    if usage_count:
+        return redirect(f"/audio?{urlencode({'error': 'Audio is used in a playlist and cannot be deleted.'})}")
+    path = Path(asset["path"])
+    if path.exists():
+        path.unlink()
+    db.execute("DELETE FROM audio_assets WHERE id = ?", (asset_id,))
+    db.commit()
+    return redirect(f"/audio?{urlencode({'message': 'Audio deleted.'})}")
+
+@app.post("/audio-playlists")
+def create_audio_playlist(
+    channel_id: int = Form(...),
+    name: str = Form(...),
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    clean_name = name.strip()
+    channel = db.execute("SELECT id FROM channels WHERE id = ?", (channel_id,)).fetchone()
+    if not channel:
+        return redirect(f"/playlists?{urlencode({'error': 'Select a valid channel.'})}")
+    if not clean_name:
+        return redirect(f"/playlists?{urlencode({'error': 'Playlist name is required.'})}")
+    now = dt_to_str(local_now())
+    db.execute(
+        """
+        INSERT INTO audio_playlists (channel_id, name, status, created_at, updated_at)
+        VALUES (?, ?, 'draft', ?, ?)
+        """,
+        (channel_id, clean_name, now, now),
+    )
+    db.commit()
+    return redirect(f"/playlists?{urlencode({'message': 'Playlist created.'})}")
+
+@app.post("/audio-playlists/{playlist_id}/add-item")
+def add_playlist_item(
+    playlist_id: int,
+    audio_asset_id: int = Form(...),
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    playlist = db.execute("SELECT id FROM audio_playlists WHERE id = ?", (playlist_id,)).fetchone()
+    asset = db.execute("SELECT id FROM audio_assets WHERE id = ?", (audio_asset_id,)).fetchone()
+    if not playlist or not asset:
+        return redirect(f"/playlists?{urlencode({'error': 'Playlist or audio file was not found.'})}")
+    row = db.execute(
+        "SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_order FROM audio_playlist_items WHERE playlist_id = ?",
+        (playlist_id,),
+    ).fetchone()
+    db.execute(
+        "INSERT INTO audio_playlist_items (playlist_id, audio_asset_id, sort_order) VALUES (?, ?, ?)",
+        (playlist_id, audio_asset_id, row["next_order"]),
+    )
+    db.execute(
+        "UPDATE audio_playlists SET status = 'draft', updated_at = ?, prepared_audio_path = NULL, last_error = NULL WHERE id = ?",
+        (dt_to_str(local_now()), playlist_id),
+    )
+    db.commit()
+    return redirect(f"/playlists?{urlencode({'message': 'Audio added to playlist.'})}")
+
+@app.post("/audio-playlist-items/{item_id}/remove")
+def remove_playlist_item(
+    item_id: int,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    item = db.execute("SELECT * FROM audio_playlist_items WHERE id = ?", (item_id,)).fetchone()
+    if not item:
+        return redirect(f"/playlists?{urlencode({'error': 'Playlist item was not found.'})}")
+    playlist_id = item["playlist_id"]
+    db.execute("DELETE FROM audio_playlist_items WHERE id = ?", (item_id,))
+    db.execute(
+        "UPDATE audio_playlists SET status = 'draft', updated_at = ?, prepared_audio_path = NULL WHERE id = ?",
+        (dt_to_str(local_now()), playlist_id),
+    )
+    db.commit()
+    return redirect(f"/playlists?{urlencode({'message': 'Audio removed from playlist.'})}")
+
+@app.post("/audio-playlist-items/{item_id}/move")
+def move_playlist_item(
+    item_id: int,
+    direction: str = Form(...),
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    item = db.execute("SELECT * FROM audio_playlist_items WHERE id = ?", (item_id,)).fetchone()
+    if not item:
+        return redirect(f"/playlists?{urlencode({'error': 'Playlist item was not found.'})}")
+    comparator = "<" if direction == "up" else ">"
+    order = "DESC" if direction == "up" else "ASC"
+    other = db.execute(
+        f"""
+        SELECT * FROM audio_playlist_items
+        WHERE playlist_id = ? AND sort_order {comparator} ?
+        ORDER BY sort_order {order}, id {order}
+        LIMIT 1
+        """,
+        (item["playlist_id"], item["sort_order"]),
+    ).fetchone()
+    if other:
+        db.execute("UPDATE audio_playlist_items SET sort_order = ? WHERE id = ?", (other["sort_order"], item_id))
+        db.execute("UPDATE audio_playlist_items SET sort_order = ? WHERE id = ?", (item["sort_order"], other["id"]))
+        db.execute(
+            "UPDATE audio_playlists SET status = 'draft', updated_at = ?, prepared_audio_path = NULL WHERE id = ?",
+            (dt_to_str(local_now()), item["playlist_id"]),
+        )
+        db.commit()
+    return redirect("/playlists")
+
+@app.post("/audio-playlists/{playlist_id}/shuffle")
+def shuffle_playlist(
+    playlist_id: int,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    items = [dict(row) for row in db.execute("SELECT * FROM audio_playlist_items WHERE playlist_id = ?", (playlist_id,)).fetchall()]
+    if not items:
+        return redirect(f"/playlists?{urlencode({'error': 'Cannot shuffle an empty playlist.'})}")
+    random.shuffle(items)
+    for index, item in enumerate(items, start=1):
+        db.execute("UPDATE audio_playlist_items SET sort_order = ? WHERE id = ?", (index, item["id"]))
+    db.execute(
+        "UPDATE audio_playlists SET status = 'draft', updated_at = ?, prepared_audio_path = NULL WHERE id = ?",
+        (dt_to_str(local_now()), playlist_id),
+    )
+    db.commit()
+    return redirect(f"/playlists?{urlencode({'message': 'Playlist shuffled.'})}")
+
+@app.post("/audio-playlists/{playlist_id}/duplicate")
+def duplicate_playlist(
+    playlist_id: int,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    playlist = db.execute("SELECT * FROM audio_playlists WHERE id = ?", (playlist_id,)).fetchone()
+    if not playlist:
+        return redirect(f"/playlists?{urlencode({'error': 'Playlist was not found.'})}")
+    now = dt_to_str(local_now())
+    cursor = db.execute(
+        """
+        INSERT INTO audio_playlists (channel_id, name, status, created_at, updated_at)
+        VALUES (?, ?, 'draft', ?, ?)
+        """,
+        (playlist["channel_id"], f"{playlist['name']} Copy", now, now),
+    )
+    new_playlist_id = cursor.lastrowid
+    for item in db.execute("SELECT * FROM audio_playlist_items WHERE playlist_id = ? ORDER BY sort_order, id", (playlist_id,)).fetchall():
+        db.execute(
+            "INSERT INTO audio_playlist_items (playlist_id, audio_asset_id, sort_order) VALUES (?, ?, ?)",
+            (new_playlist_id, item["audio_asset_id"], item["sort_order"]),
+        )
+    db.commit()
+    return redirect(f"/playlists?{urlencode({'message': 'Playlist duplicated.'})}")
+
+def prepare_audio_playlist(conn: sqlite3.Connection, playlist_id: int) -> tuple[bool, str]:
+    ffmpeg_info = ffmpeg_probe(timeout=10)
+    ffprobe_info = ffprobe_probe(timeout=10)
+    if not ffmpeg_info["detected"] or not ffprobe_info["detected"]:
+        return False, "FFmpeg and FFprobe are required to prepare playlists."
+    playlist = conn.execute("SELECT * FROM audio_playlists WHERE id = ?", (playlist_id,)).fetchone()
+    if not playlist:
+        return False, "Playlist was not found."
+    items = [
+        dict(row)
+        for row in conn.execute(
+            """
+            SELECT audio_assets.*
+            FROM audio_playlist_items
+            JOIN audio_assets ON audio_assets.id = audio_playlist_items.audio_asset_id
+            WHERE audio_playlist_items.playlist_id = ?
+            ORDER BY audio_playlist_items.sort_order, audio_playlist_items.id
+            """,
+            (playlist_id,),
+        ).fetchall()
+    ]
+    if not items:
+        return False, "Cannot prepare playlist without audio items."
+    missing = [item["original_filename"] for item in items if not Path(item["path"]).exists()]
+    if missing:
+        return False, f"Missing audio files: {', '.join(missing)}"
+
+    now = dt_to_str(local_now())
+    output_path = READY_DIR / f"audio_playlist_{playlist_id}.m4a"
+    concat_path = READY_DIR / f"audio_playlist_{playlist_id}.txt"
+    log_file_path = LOG_DIR / f"audio_playlist_{playlist_id}.log"
+    conn.execute(
+        "UPDATE audio_playlists SET status = 'processing', updated_at = ?, last_error = NULL WHERE id = ?",
+        (now, playlist_id),
+    )
+    conn.commit()
+
+    def concat_line(path_value: str) -> str:
+        escaped = path_value.replace("\\", "/").replace("'", "'\\''")
+        return f"file '{escaped}'"
+
+    concat_path.write_text("\n".join(concat_line(item["path"]) for item in items), encoding="utf-8")
+    cmd = [
+        ffmpeg_info["path"],
+        "-y",
+        "-hide_banner",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        str(concat_path),
+        "-vn",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        str(output_path),
+    ]
+    with log_file_path.open("w", encoding="utf-8", errors="replace") as log_file:
+        process = subprocess.run(cmd, stdout=log_file, stderr=subprocess.STDOUT, text=True)
+    if process.returncode != 0 or not output_path.exists():
+        error = f"FFmpeg prepare failed with exit code {process.returncode}."
+        conn.execute(
+            "UPDATE audio_playlists SET status = 'error', last_error = ?, updated_at = ? WHERE id = ?",
+            (error, dt_to_str(local_now()), playlist_id),
+        )
+        conn.commit()
+        return False, error
+    duration_seconds = probe_audio_duration(output_path) or playlist_total_duration(conn, playlist_id)
+    conn.execute(
+        """
+        UPDATE audio_playlists
+        SET status = 'ready', prepared_audio_path = ?, total_duration_seconds = ?,
+            last_error = NULL, updated_at = ?
+        WHERE id = ?
+        """,
+        (str(output_path), duration_seconds, dt_to_str(local_now()), playlist_id),
+    )
+    conn.commit()
+    return True, "Playlist prepared."
+
+@app.post("/audio-playlists/{playlist_id}/prepare")
+def prepare_playlist_route(
+    playlist_id: int,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    ok, message = prepare_audio_playlist(db, playlist_id)
+    key = "message" if ok else "error"
+    return redirect(f"/playlists?{urlencode({key: message})}")
+
 NAV_ITEMS = [
     {"key": "dashboard", "label": "Dashboard", "href": "/dashboard"},
     {"key": "channels", "label": "Channels", "href": "/channels"},
@@ -749,10 +1283,15 @@ def admin_context(
                    channels.name AS channel_table_name,
                    channels.handle AS channel_handle,
                    channels.is_active AS channel_is_active,
-                   COALESCE(channels.name, live_jobs.channel_name) AS display_channel_name
+                   COALESCE(channels.name, live_jobs.channel_name) AS display_channel_name,
+                   audio_playlists.name AS audio_playlist_name,
+                   audio_playlists.status AS audio_playlist_status,
+                   audio_playlists.prepared_audio_path AS prepared_audio_path,
+                   audio_playlists.total_duration_seconds AS audio_playlist_duration_seconds
             FROM live_jobs
             JOIN videos ON videos.id = live_jobs.video_id
             LEFT JOIN channels ON channels.id = live_jobs.channel_id
+            LEFT JOIN audio_playlists ON audio_playlists.id = live_jobs.audio_playlist_id
             ORDER BY live_jobs.created_at DESC
             """
         ).fetchall()
@@ -775,6 +1314,51 @@ def admin_context(
         for row in db.execute(
             "SELECT * FROM channels WHERE is_active = 1 ORDER BY name COLLATE NOCASE"
         ).fetchall()
+    ]
+    audio_assets = [
+        dict(row)
+        for row in db.execute(
+            """
+            SELECT audio_assets.*,
+                   COUNT(audio_playlist_items.id) AS playlist_usage_count
+            FROM audio_assets
+            LEFT JOIN audio_playlist_items ON audio_playlist_items.audio_asset_id = audio_assets.id
+            GROUP BY audio_assets.id
+            ORDER BY audio_assets.created_at DESC
+            """
+        ).fetchall()
+    ]
+    audio_playlists = [
+        dict(row)
+        for row in db.execute(
+            """
+            SELECT audio_playlists.*, channels.name AS channel_name, channels.handle AS channel_handle,
+                   COUNT(audio_playlist_items.id) AS item_count,
+                   COALESCE(SUM(audio_assets.duration_seconds), 0) AS item_duration_seconds
+            FROM audio_playlists
+            JOIN channels ON channels.id = audio_playlists.channel_id
+            LEFT JOIN audio_playlist_items ON audio_playlist_items.playlist_id = audio_playlists.id
+            LEFT JOIN audio_assets ON audio_assets.id = audio_playlist_items.audio_asset_id
+            GROUP BY audio_playlists.id
+            ORDER BY channels.name COLLATE NOCASE, audio_playlists.created_at DESC
+            """
+        ).fetchall()
+    ]
+    playlist_items = [
+        dict(row)
+        for row in db.execute(
+            """
+            SELECT audio_playlist_items.*, audio_assets.original_filename, audio_assets.filename,
+                   audio_assets.duration_seconds, audio_playlists.channel_id
+            FROM audio_playlist_items
+            JOIN audio_assets ON audio_assets.id = audio_playlist_items.audio_asset_id
+            JOIN audio_playlists ON audio_playlists.id = audio_playlist_items.playlist_id
+            ORDER BY audio_playlist_items.playlist_id, audio_playlist_items.sort_order, audio_playlist_items.id
+            """
+        ).fetchall()
+    ]
+    ready_playlists = [
+        playlist for playlist in audio_playlists if playlist.get("status") == "ready" and playlist.get("prepared_audio_path")
     ]
     totals = {
         "videos": db.execute("SELECT COUNT(*) FROM videos").fetchone()[0],
@@ -807,6 +1391,10 @@ def admin_context(
         "completed_jobs": completed_jobs,
         "channels": channels,
         "active_channels": active_channels,
+        "audio_assets": audio_assets,
+        "audio_playlists": audio_playlists,
+        "playlist_items": playlist_items,
+        "ready_playlists": ready_playlists,
         "totals": totals,
         "warnings": warnings,
         "message": message,
@@ -816,11 +1404,15 @@ def admin_context(
         "display_dt": display_dt,
         "display_dt_local": display_dt_local,
         "format_duration_minutes": format_duration_minutes,
+        "format_seconds": format_seconds,
         "job_schedule_lines": job_schedule_lines,
+        "audio_playlist_log_text": audio_playlist_log_text,
         "mask_secret": mask_secret,
         "admin_username": ADMIN_USERNAME,
         "database_path": str(DB_PATH),
         "video_dir": str(VIDEO_DIR),
+        "audio_dir": str(AUDIO_DIR),
+        "ready_dir": str(READY_DIR),
         "log_dir": str(LOG_DIR),
     }
 
@@ -886,7 +1478,7 @@ def audio_page(
     message: str | None = None,
     error: str | None = None,
 ):
-    return render_admin("placeholder.html", request, db, "audio", "Audio Library", message, error)
+    return render_admin("audio.html", request, db, "audio", "Audio Library", message, error)
 
 @app.get("/playlists", response_class=HTMLResponse)
 def playlists_page(
@@ -896,7 +1488,7 @@ def playlists_page(
     message: str | None = None,
     error: str | None = None,
 ):
-    return render_admin("placeholder.html", request, db, "playlists", "Playlists", message, error)
+    return render_admin("playlists.html", request, db, "playlists", "Playlists", message, error)
 
 @app.get("/live-jobs", response_class=HTMLResponse)
 def live_jobs_page(
@@ -978,6 +1570,7 @@ def create_job(
     live_name: str = Form(...),
     channel_id: int | None = Form(None),
     video_id: int = Form(...),
+    audio_playlist_id: int | None = Form(None),
     stream_key: str = Form(""),
     schedule_mode: str = Form("manual_now"),
     start_at: str | None = Form(None),
@@ -1004,6 +1597,20 @@ def create_job(
         return redirect("/live-jobs?error=Selected%20video%20was%20not%20found")
     if not Path(video["path"]).exists():
         return redirect("/live-jobs?error=Selected%20video%20file%20does%20not%20exist")
+    selected_audio_playlist_id = None
+    if audio_playlist_id:
+        playlist = db.execute(
+            """
+            SELECT * FROM audio_playlists
+            WHERE id = ? AND channel_id = ? AND status = 'ready' AND prepared_audio_path IS NOT NULL
+            """,
+            (audio_playlist_id, channel_id),
+        ).fetchone()
+        if not playlist:
+            return redirect(f"/live-jobs?{urlencode({'error': 'Selected audio playlist is not ready for this channel.'})}")
+        if not Path(playlist["prepared_audio_path"]).exists():
+            return redirect(f"/live-jobs?{urlencode({'error': 'Prepared audio playlist file is missing.'})}")
+        selected_audio_playlist_id = audio_playlist_id
     if schedule_mode not in {"manual_now", "start_end", "start_duration"}:
         schedule_mode = "manual_now"
     try:
@@ -1048,16 +1655,17 @@ def create_job(
     db.execute(
         """
         INSERT INTO live_jobs (
-            live_name, channel_name, channel_id, video_id, stream_key, start_at, end_at,
+            live_name, channel_name, channel_id, video_id, audio_playlist_id, stream_key, start_at, end_at,
             duration_minutes, status, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             clean_live_name,
             clean_channel_name,
             channel_id,
             video_id,
+            selected_audio_playlist_id,
             clean_stream_key,
             dt_to_str(start_value),
             dt_to_str(end_value),

@@ -1,0 +1,84 @@
+{% extends "admin.html" %}
+{% block title %}Playlists{% endblock %}
+{% block admin_content %}
+<section class="grid gap-6 xl:grid-cols-4">
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <h3 class="text-base font-semibold">Create Playlist</h3>
+    <p class="mt-1 text-sm text-zinc-400">Each playlist belongs to one channel. Audio files are reused from the global library.</p>
+    <form method="post" action="/audio-playlists" class="mt-4 space-y-4">
+      <label class="block">
+        <span class="text-sm font-medium text-zinc-300">Channel</span>
+        <select name="channel_id" required class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+          {% for channel in active_channels %}
+            <option value="{{ channel.id }}">{{ channel.name }}{% if channel.handle %} ({{ channel.handle }}){% endif %}</option>
+          {% else %}
+            <option value="">Add an active channel first</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="block">
+        <span class="text-sm font-medium text-zinc-300">Playlist name</span>
+        <input name="name" required class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+      </label>
+      <button class="w-full rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400">Create playlist</button>
+    </form>
+  </div>
+
+  <div class="space-y-4 xl:col-span-3">
+    {% for playlist in audio_playlists %}
+      <section class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div class="flex flex-wrap items-center gap-2">
+              <h3 class="text-base font-semibold">{{ playlist.name }}</h3>
+              <span class="rounded-full px-2 py-1 text-xs {% if playlist.status == 'ready' %}bg-emerald-950 text-emerald-300{% elif playlist.status == 'error' %}bg-red-950 text-red-300{% elif playlist.status == 'processing' %}bg-sky-950 text-sky-300{% else %}bg-zinc-800 text-zinc-300{% endif %}">{{ playlist.status }}</span>
+            </div>
+            <p class="mt-1 text-sm text-zinc-400">{{ playlist.channel_name }}{% if playlist.channel_handle %} · {{ playlist.channel_handle }}{% endif %}</p>
+            <p class="mt-1 text-xs text-zinc-500">{{ playlist.item_count }} songs · Total: {{ format_seconds(playlist.item_duration_seconds or playlist.total_duration_seconds) }}</p>
+            {% if playlist.last_error %}
+              <p class="mt-2 rounded-md border border-red-900 bg-red-950 px-3 py-2 text-xs text-red-200">{{ playlist.last_error }}</p>
+              <pre class="mt-2 max-h-40 overflow-auto rounded-md bg-black p-3 text-xs text-zinc-300">{{ audio_playlist_log_text(playlist.id) }}</pre>
+            {% endif %}
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <form method="post" action="/audio-playlists/{{ playlist.id }}/prepare"><button class="rounded-md bg-emerald-500 px-3 py-2 text-xs font-medium text-zinc-950 hover:bg-emerald-400">Prepare Playlist</button></form>
+            <form method="post" action="/audio-playlists/{{ playlist.id }}/shuffle"><button class="rounded-md border border-zinc-700 px-3 py-2 text-xs hover:bg-zinc-800">Shuffle order</button></form>
+            <form method="post" action="/audio-playlists/{{ playlist.id }}/duplicate"><button class="rounded-md border border-zinc-700 px-3 py-2 text-xs hover:bg-zinc-800">Duplicate</button></form>
+          </div>
+        </div>
+
+        <form method="post" action="/audio-playlists/{{ playlist.id }}/add-item" class="mt-4 flex flex-col gap-2 sm:flex-row">
+          <select name="audio_asset_id" required class="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+            {% for audio in audio_assets %}
+              <option value="{{ audio.id }}">{{ audio.original_filename }} · {{ format_seconds(audio.duration_seconds) }}</option>
+            {% else %}
+              <option value="">Upload audio first</option>
+            {% endfor %}
+          </select>
+          <button class="rounded-md border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-800">Add to queue</button>
+        </form>
+
+        <div class="mt-4 divide-y divide-zinc-800 rounded-md border border-zinc-800 bg-zinc-950">
+          {% for item in playlist_items if item.playlist_id == playlist.id %}
+            <div class="flex flex-col gap-3 p-3 sm:flex-row sm:items-center">
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-medium">{{ item.original_filename }}</p>
+                <p class="text-xs text-zinc-500">Duration: {{ format_seconds(item.duration_seconds) }}</p>
+              </div>
+              <div class="flex gap-2">
+                <form method="post" action="/audio-playlist-items/{{ item.id }}/move"><input type="hidden" name="direction" value="up"><button class="rounded-md border border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-800">Up</button></form>
+                <form method="post" action="/audio-playlist-items/{{ item.id }}/move"><input type="hidden" name="direction" value="down"><button class="rounded-md border border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-800">Down</button></form>
+                <form method="post" action="/audio-playlist-items/{{ item.id }}/remove"><button class="rounded-md border border-red-900 px-2 py-1 text-xs text-red-300 hover:bg-red-950">Remove</button></form>
+              </div>
+            </div>
+          {% else %}
+            <p class="p-4 text-sm text-zinc-500">No audio in this playlist yet.</p>
+          {% endfor %}
+        </div>
+      </section>
+    {% else %}
+      <p class="rounded-lg border border-zinc-800 bg-zinc-900 p-6 text-center text-sm text-zinc-500">No playlists yet.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

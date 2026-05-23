@@ -14,6 +14,8 @@ data/*.sqlite3
 
 uploads/videos/*
 !uploads/videos/.gitkeep
+uploads/audio/*
+!uploads/audio/.gitkeep
 uploads/ready/*
 !uploads/ready/.gitkeep
 uploads/logs/*

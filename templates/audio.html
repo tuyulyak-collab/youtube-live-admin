@@ -1,0 +1,70 @@
+{% extends "admin.html" %}
+{% block title %}Audio Library{% endblock %}
+{% block admin_content %}
+<section class="grid gap-6 lg:grid-cols-3">
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <h3 class="text-base font-semibold">Upload Audio Files</h3>
+    <p class="mt-1 text-sm text-zinc-400">Bisa pilih banyak lagu sekaligus. Format: MP3, WAV, M4A.</p>
+    <p class="mt-1 text-xs text-zinc-500">Audio Library is global. Upload once, reuse across many channel playlists.</p>
+    <form method="post" action="/audio-assets" enctype="multipart/form-data" class="mt-4 space-y-4">
+      <label class="block">
+        <span class="text-sm font-medium text-zinc-300">Audio files</span>
+        <input id="audio-files-input" name="files" type="file" multiple accept=".mp3,.wav,.m4a,audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a" required class="mt-2 block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-emerald-500 file:px-3 file:py-2 file:text-zinc-950">
+      </label>
+      <p id="audio-selected-count" class="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-500">Belum ada file dipilih.</p>
+      <button class="w-full rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400">Upload Audio Files</button>
+    </form>
+  </div>
+
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4 lg:col-span-2">
+    <h3 class="text-base font-semibold">Uploaded Audio Files</h3>
+    <div class="mt-4 space-y-3">
+      {% for audio in audio_assets %}
+        <div class="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+          <div class="grid gap-3 lg:grid-cols-5 lg:items-center">
+            <div class="lg:col-span-2">
+              <p class="font-medium">{{ audio.original_filename }}</p>
+              <p class="break-all text-xs text-zinc-500">{{ audio.filename }}</p>
+            </div>
+            <div class="text-sm text-zinc-400">
+              <p>Size: {{ (audio.file_size / 1024)|round(1) }} KB</p>
+              <p>Duration: {{ format_seconds(audio.duration_seconds) }}</p>
+              <p>Created: {{ display_dt(audio.created_at) }}</p>
+            </div>
+            <audio controls preload="none" class="w-full lg:col-span-1">
+              <source src="/audio-assets/{{ audio.id }}/preview">
+            </audio>
+            <div class="flex justify-end">
+              <form method="post" action="/audio-assets/{{ audio.id }}/delete">
+                <button {% if audio.playlist_usage_count %}disabled{% endif %} class="rounded-md border border-red-900 px-3 py-2 text-xs text-red-300 hover:bg-red-950 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-600">
+                  {% if audio.playlist_usage_count %}Used in playlist{% else %}Delete{% endif %}
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      {% else %}
+        <p class="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-6 text-center text-sm text-zinc-500">No audio files uploaded yet.</p>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+<script>
+  const audioFilesInput = document.getElementById("audio-files-input");
+  const audioSelectedCount = document.getElementById("audio-selected-count");
+  if (audioFilesInput && audioSelectedCount) {
+    audioFilesInput.addEventListener("change", () => {
+      const count = audioFilesInput.files ? audioFilesInput.files.length : 0;
+      audioSelectedCount.textContent = count
+        ? `${count} file dipilih. Klik Upload Audio Files untuk menyimpan.`
+        : "Belum ada file dipilih.";
+      audioSelectedCount.classList.toggle("text-amber-200", count > 0);
+      audioSelectedCount.classList.toggle("border-amber-900", count > 0);
+      audioSelectedCount.classList.toggle("bg-amber-950", count > 0);
+      audioSelectedCount.classList.toggle("text-zinc-500", count === 0);
+      audioSelectedCount.classList.toggle("border-zinc-800", count === 0);
+      audioSelectedCount.classList.toggle("bg-zinc-950", count === 0);
+    });
+  }
+</script>
+{% endblock %}

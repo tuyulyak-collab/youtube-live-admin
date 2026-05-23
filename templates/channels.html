@@ -31,7 +31,16 @@
     <label class="block"><span class="text-xs font-medium text-zinc-500">Name</span><input name="name" required placeholder="Channel name" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"></label>
     <label class="block"><span class="text-xs font-medium text-zinc-500">Handle</span><input name="handle" placeholder="@handle" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"></label>
     <label class="block"><span class="text-xs font-medium text-zinc-500">Niche</span><input name="niche" placeholder="Niche" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"></label>
-    <label class="block"><span class="text-xs font-medium text-zinc-500">Default stream key</span><input name="default_stream_key" type="password" autocomplete="off" placeholder="Optional" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"></label>
+    <div class="block">
+      <span class="text-xs font-medium text-zinc-500">Default stream key</span>
+      <span class="mt-1 flex rounded-md border border-zinc-700 bg-zinc-950 focus-within:border-emerald-500">
+        <input id="default-stream-key-new" name="default_stream_key" type="password" autocomplete="off" placeholder="Optional" class="min-w-0 flex-1 rounded-l-md bg-transparent px-3 py-2 text-sm outline-none">
+        <button type="button" data-secret-toggle data-target="default-stream-key-new" aria-label="Show default stream key" class="flex w-10 items-center justify-center rounded-r-md border-l border-zinc-700 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+        </button>
+      </span>
+      <span class="mt-1 block text-xs text-zinc-500">Klik ikon mata untuk melihat atau menyembunyikan stream key.</span>
+    </div>
     <label class="block"><span class="text-xs font-medium text-zinc-500">Notes</span><input name="notes" placeholder="Notes" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"></label>
     <div class="flex items-center gap-3">
       <label class="flex items-center gap-2 text-sm"><input name="is_active" type="checkbox" checked>Active</label>
@@ -50,7 +59,14 @@
           <input name="name" value="{{ channel.name }}" required class="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm">
           <input name="handle" value="{{ channel.handle or '' }}" class="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm">
           <input name="niche" value="{{ channel.niche or '' }}" class="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm">
-          <input name="default_stream_key" value="{{ channel.default_stream_key or '' }}" type="password" autocomplete="off" class="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm">
+          <div>
+            <div class="flex rounded-md border border-zinc-700 bg-zinc-900 focus-within:border-emerald-500">
+              <input id="default-stream-key-{{ channel.id }}" name="default_stream_key" value="{{ channel.default_stream_key or '' }}" type="password" autocomplete="off" class="min-w-0 flex-1 rounded-l-md bg-transparent px-3 py-2 text-sm outline-none">
+              <button type="button" data-secret-toggle data-target="default-stream-key-{{ channel.id }}" aria-label="Show default stream key" class="flex w-10 items-center justify-center rounded-r-md border-l border-zinc-700 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              </button>
+            </div>
+          </div>
           <input name="notes" value="{{ channel.notes or '' }}" class="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm">
           <div class="flex items-center gap-2">
             <label class="flex items-center gap-2 text-sm"><input name="is_active" type="checkbox" {% if channel.is_active %}checked{% endif %}>Active</label>
@@ -67,4 +83,16 @@
     {% endfor %}
   </div>
 </section>
+<script>
+  document.querySelectorAll("[data-secret-toggle]").forEach((button) => {
+    const target = document.getElementById(button.dataset.target);
+    if (!target) return;
+    button.addEventListener("click", () => {
+      const isVisible = target.type === "text";
+      target.type = isVisible ? "password" : "text";
+      button.setAttribute("aria-label", isVisible ? "Show default stream key" : "Hide default stream key");
+      button.classList.toggle("text-emerald-300", !isVisible);
+    });
+  });
+</script>
 {% endblock %}

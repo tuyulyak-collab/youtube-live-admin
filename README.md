@@ -104,7 +104,7 @@ Default local test login from `.env.example`:
 admin / admin123
 ```
 
-Uploaded videos are saved to `uploads/videos`. FFmpeg logs are saved to `uploads/logs`. SQLite data is saved to `data/app.db`.
+Uploaded videos are saved to `uploads/videos`. Uploaded audio is saved to `uploads/audio`. Prepared audio playlists are saved to `uploads/ready`. FFmpeg logs are saved to `uploads/logs`. SQLite data is saved to `data/app.db`.
 
 ## Admin Layout
 
@@ -113,8 +113,8 @@ The admin UI is split into tabs with a responsive dark dashboard layout:
 - `Dashboard`: summary stats, FFmpeg status, quick live job overview, and latest log preview.
 - `Channels`: channel records used by Live Jobs. A placeholder note is shown while the full channel workflow continues to evolve.
 - `Video Library`: MP4 upload and uploaded video list.
-- `Audio Library`: placeholder for future audio upload and music library features.
-- `Playlists`: placeholder for future per-channel audio playlists.
+- `Audio Library`: global MP3, WAV, and M4A uploads with duration, size, preview, and delete controls.
+- `Playlists`: per-channel song queues built from the global Audio Library.
 - `Live Jobs`: create live job form, live job table, and Start/Stop controls.
 - `Scheduler`: scheduling mode explanation and scheduled jobs overview.
 - `History`: placeholder for completed and failed live history, with a small current-job preview where available.
@@ -136,9 +136,50 @@ Each channel can store:
 
 Channel names are required and must be unique.
 
-If a channel has a default stream key, selecting that channel auto-fills the stream key field in the Live Job form. You can still edit the stream key before creating the job. Stream keys are masked in the visible channel list where possible.
+If a channel has a default stream key, selecting that channel auto-fills the stream key field in the Live Job form. You can still edit the stream key before creating the job. Stream keys are hidden by default in forms, can be revealed with the eye button when you need to check them, and are masked in tables/logs where possible.
+
+Never share stream keys publicly and do not commit stream keys to GitHub. Keep them in `.env`, in the local admin UI, or in another private password manager.
 
 Inactive channels stay in the database but are hidden from the Create Live Job dropdown. If a channel is already used by live jobs, deleting it will set it inactive instead of removing it, so existing jobs keep working and can still display their channel name.
+
+## Audio Library And Playlists
+
+The Audio Library is global. Upload an audio file once, then reuse the same file in any number of channel playlists without duplicating the file on disk.
+
+The `Audio Library` upload control supports bulk upload. You can select one song or many songs at once, then click `Upload Audio Files`. After upload, the app shows a summary with:
+
+- total selected
+- uploaded successfully
+- skipped/failed
+
+Invalid formats are skipped with a friendly message. Valid files from the same batch are still saved, so a mixed upload can partially succeed.
+
+Supported upload formats:
+
+- MP3
+- WAV
+- M4A
+
+Each uploaded audio file shows its original filename, stored filename, file size, created date, browser preview player, and duration when FFprobe can read it.
+
+Playlists belong to channels. Every channel can have a different playlist and song queue. In the `Playlists` tab:
+
+- create a playlist for a channel
+- add songs from the global Audio Library
+- reorder songs with Up and Down controls
+- remove a song from the playlist without deleting the original audio file
+- shuffle the queue
+- duplicate a playlist
+- prepare the playlist into one ready audio file
+
+Preparing a playlist writes:
+
+```text
+uploads/ready/audio_playlist_<playlist_id>.m4a
+uploads/logs/audio_playlist_<playlist_id>.log
+```
+
+The prepared file can be selected in the Live Jobs form. When selected, FFmpeg streams the looping video with the prepared audio playlist. If no prepared playlist is selected, the app keeps the current behavior and uses the video's original audio/input.
 
 ## Scheduling Modes
 
@@ -189,4 +230,4 @@ Starting a job runs FFmpeg in the background with:
 ffmpeg -re -stream_loop -1 -i selected-video.mp4 ... -f flv rtmp://a.rtmp.youtube.com/live2/{stream_key}
 ```
 
-The stream key is entered per job and is not hardcoded in the app. The UI masks stream keys in tables and logs.
+The stream key is entered per job and is not hardcoded in the app. The UI masks stream keys in tables and logs. In the Live Jobs and Channels forms, stream key inputs are hidden by default; click the eye button only when you need to verify a key, then hide it again before sharing your screen.
