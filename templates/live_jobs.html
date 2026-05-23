@@ -166,13 +166,19 @@
         <button type="button" id="unselect-all-jobs" class="rounded-md border border-zinc-700 px-3 py-2 text-xs font-medium hover:bg-zinc-800">Unselect All</button>
         <span id="selected-job-count" class="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-300">Selected: 0</span>
       </div>
-      <form id="bulk-jobs-form" method="post" action="/jobs/bulk" class="flex flex-wrap gap-2">
-        <div id="bulk-job-inputs"></div>
-        <button name="action" value="start" class="rounded-md bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-500">Start Selected</button>
-        <button name="action" value="stop" class="rounded-md bg-red-700 px-3 py-2 text-xs font-medium text-white hover:bg-red-600">Stop Selected</button>
-        <button name="action" value="queue" class="rounded-md bg-sky-700 px-3 py-2 text-xs font-medium text-white hover:bg-sky-600">Move Selected to Queue</button>
-        <button name="action" value="delete" class="rounded-md border border-red-900 px-3 py-2 text-xs font-medium text-red-300 hover:bg-red-950">Delete Selected</button>
-      </form>
+      <div class="flex flex-wrap gap-2">
+        <form method="post" action="/jobs/archive-completed">
+          <button class="rounded-md border border-amber-800 px-3 py-2 text-xs font-medium text-amber-200 hover:bg-amber-950">Archive completed jobs</button>
+        </form>
+        <form id="bulk-jobs-form" method="post" action="/jobs/bulk" class="flex flex-wrap gap-2">
+          <div id="bulk-job-inputs"></div>
+          <button name="action" value="start" class="rounded-md bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-500">Start Selected</button>
+          <button name="action" value="stop" class="rounded-md bg-red-700 px-3 py-2 text-xs font-medium text-white hover:bg-red-600">Stop Selected</button>
+          <button name="action" value="queue" class="rounded-md bg-sky-700 px-3 py-2 text-xs font-medium text-white hover:bg-sky-600">Move Selected to Queue</button>
+          <button name="action" value="archive" class="rounded-md border border-amber-800 px-3 py-2 text-xs font-medium text-amber-200 hover:bg-amber-950">Archive Selected</button>
+          <button name="action" value="delete" class="rounded-md border border-red-900 px-3 py-2 text-xs font-medium text-red-300 hover:bg-red-950">Delete Selected</button>
+        </form>
+      </div>
     </div>
   </div>
 
@@ -193,7 +199,7 @@
             <th class="w-72 px-3 py-3">Media</th>
             <th class="w-56 px-3 py-3">Schedule</th>
             <th class="w-52 px-3 py-3">Status</th>
-            <th class="w-56 px-3 py-3 text-right">Actions</th>
+            <th class="w-64 px-3 py-3 text-right">Actions</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-zinc-800">
@@ -229,7 +235,10 @@
                   <form method="post" action="/jobs/{{ job.id }}/start"><button class="rounded-md bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-500">Start</button></form>
                   <form method="post" action="/jobs/{{ job.id }}/stop"><button class="rounded-md bg-red-700 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-red-600">Stop</button></form>
                   <a href="/jobs/{{ job.id }}/logs" class="rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs font-medium hover:bg-zinc-800">Logs</a>
-                  <form method="post" action="/jobs/{{ job.id }}/delete" onsubmit="return confirm('Delete this live job? Uploaded videos, audio, and playlists will not be deleted.');"><button class="rounded-md border border-red-900 px-2.5 py-1.5 text-xs font-medium text-red-300 hover:bg-red-950">Del</button></form>
+                  {% if job.status in ['done', 'stopped', 'error'] %}
+                    <form method="post" action="/jobs/{{ job.id }}/archive"><button class="rounded-md border border-amber-800 px-2.5 py-1.5 text-xs font-medium text-amber-200 hover:bg-amber-950">Arch</button></form>
+                  {% endif %}
+                  <form method="post" action="/jobs/{{ job.id }}/delete" onsubmit="return confirm('Remove this live job from active list and keep it in History? Uploaded videos, audio, and playlists will not be deleted.');"><button class="rounded-md border border-red-900 px-2.5 py-1.5 text-xs font-medium text-red-300 hover:bg-red-950">Del</button></form>
                 </div>
               </td>
             </tr>
@@ -305,7 +314,11 @@
         alert("Select at least one live job first.");
         return;
       }
-      if (action === "delete" && !confirm("Delete selected live jobs? Running jobs will be skipped. Uploaded videos, audio, and playlists will not be deleted.")) {
+      if (action === "archive" && !confirm("Archive selected completed jobs to History? Running and unfinished jobs will be skipped.")) {
+        event.preventDefault();
+        return;
+      }
+      if (action === "delete" && !confirm("Remove selected live jobs from active list and keep them in History? Running jobs will be skipped. Uploaded videos, audio, and playlists will not be deleted.")) {
         event.preventDefault();
         return;
       }

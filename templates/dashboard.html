@@ -24,6 +24,39 @@
   </div>
 </section>
 
+<section class="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <p class="text-sm text-zinc-400">Today completed</p>
+    <p class="mt-2 text-3xl font-semibold text-teal-300">{{ dashboard_history.today_completed }}</p>
+  </div>
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <p class="text-sm text-zinc-400">Today error</p>
+    <p class="mt-2 text-3xl font-semibold text-red-400">{{ dashboard_history.today_error }}</p>
+  </div>
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <p class="text-sm text-zinc-400">Runtime today</p>
+    <p class="mt-2 text-2xl font-semibold">{{ dashboard_history.runtime_today }}</p>
+  </div>
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <p class="text-sm text-zinc-400">Last finished job</p>
+    {% if dashboard_history.last_finished %}
+      <p class="mt-2 break-words text-sm font-semibold">{{ dashboard_history.last_finished.live_name }}</p>
+      <p class="mt-1 text-xs text-zinc-500">{{ display_dt(dashboard_history.last_finished.stopped_at) }}</p>
+    {% else %}
+      <p class="mt-2 text-sm text-zinc-500">-</p>
+    {% endif %}
+  </div>
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <p class="text-sm text-zinc-400">Last failed job</p>
+    {% if dashboard_history.last_failed %}
+      <p class="mt-2 break-words text-sm font-semibold">{{ dashboard_history.last_failed.live_name }}</p>
+      <p class="mt-1 text-xs text-zinc-500">{{ display_dt(dashboard_history.last_failed.stopped_at or dashboard_history.last_failed.updated_at) }}</p>
+    {% else %}
+      <p class="mt-2 text-sm text-zinc-500">-</p>
+    {% endif %}
+  </div>
+</section>
+
 <section class="mt-6 grid gap-6 lg:grid-cols-3">
   <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4 lg:col-span-2">
     <h3 class="text-base font-semibold">Quick Overview</h3>

@@ -1,0 +1,129 @@
+{% extends "admin.html" %}
+{% block title %}History{% endblock %}
+{% block admin_content %}
+<section class="space-y-6">
+  <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+      <p class="text-sm text-zinc-400">Total completed</p>
+      <p class="mt-2 text-3xl font-semibold text-teal-300">{{ history_totals.completed }}</p>
+    </div>
+    <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+      <p class="text-sm text-zinc-400">Total stopped</p>
+      <p class="mt-2 text-3xl font-semibold">{{ history_totals.stopped }}</p>
+    </div>
+    <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+      <p class="text-sm text-zinc-400">Total error</p>
+      <p class="mt-2 text-3xl font-semibold text-red-400">{{ history_totals.error }}</p>
+    </div>
+    <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+      <p class="text-sm text-zinc-400">Total duration</p>
+      <p class="mt-2 text-2xl font-semibold">{{ history_totals.total_duration }}</p>
+    </div>
+  </div>
+
+  <form method="get" action="/history" class="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+    <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <h3 class="text-base font-semibold">History Filters</h3>
+        <p class="mt-1 text-sm text-zinc-400">Cari job selesai, stopped, error, atau yang sudah diarsipkan.</p>
+      </div>
+      <a href="/history/export.csv?channel_id={{ job_filters.channel_id or '' }}&status={{ job_filters.status or '' }}&date_from={{ job_filters.date_from or '' }}&date_to={{ job_filters.date_to or '' }}&search={{ (job_filters.search or '')|urlencode }}" class="rounded-md border border-zinc-700 px-4 py-2 text-sm font-medium hover:bg-zinc-800">Export CSV</a>
+    </div>
+    <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <label class="block">
+        <span class="text-xs font-medium text-zinc-500">Channel</span>
+        <select name="channel_id" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+          <option value="">All channels</option>
+          {% for channel in channels %}
+            <option value="{{ channel.id }}" {% if job_filters.channel_id == channel.id|string %}selected{% endif %}>{{ channel.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="block">
+        <span class="text-xs font-medium text-zinc-500">Status</span>
+        <select name="status" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+          <option value="">All statuses</option>
+          {% for status in history_statuses %}
+            <option value="{{ status }}" {% if job_filters.status == status %}selected{% endif %}>{{ status }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="block">
+        <span class="text-xs font-medium text-zinc-500">Date from</span>
+        <input name="date_from" value="{{ job_filters.date_from or '' }}" type="date" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+      </label>
+      <label class="block">
+        <span class="text-xs font-medium text-zinc-500">Date to</span>
+        <input name="date_to" value="{{ job_filters.date_to or '' }}" type="date" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+      </label>
+      <label class="block md:col-span-2 xl:col-span-1">
+        <span class="text-xs font-medium text-zinc-500">Search live name/video</span>
+        <input name="search" value="{{ job_filters.search or '' }}" placeholder="Live name or video" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+      </label>
+    </div>
+    <div class="mt-4 flex flex-wrap gap-2">
+      <button class="rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400">Apply filters</button>
+      <a href="/history" class="rounded-md border border-zinc-700 px-4 py-2 text-sm font-medium hover:bg-zinc-800">Clear</a>
+    </div>
+  </form>
+
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h3 class="text-base font-semibold">History Records</h3>
+        <p class="mt-1 text-sm text-zinc-400">Archived records stay here until deleted from History.</p>
+      </div>
+      <div class="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-300">
+        Showing <span class="font-semibold text-zinc-100">{{ history_jobs|length }}</span> records
+      </div>
+    </div>
+    <div class="mt-4 overflow-x-auto rounded-lg border border-zinc-800">
+      <table class="min-w-[1420px] table-fixed divide-y divide-zinc-800 text-sm">
+        <thead class="bg-zinc-950 text-left text-xs uppercase tracking-wide text-zinc-500">
+          <tr>
+            <th class="w-56 px-3 py-3">Live name</th>
+            <th class="w-44 px-3 py-3">Channel</th>
+            <th class="w-64 px-3 py-3">Video</th>
+            <th class="w-48 px-3 py-3">Audio playlist</th>
+            <th class="w-40 px-3 py-3">Started at</th>
+            <th class="w-40 px-3 py-3">Stopped at</th>
+            <th class="w-36 px-3 py-3">Duration ran</th>
+            <th class="w-32 px-3 py-3">Final status</th>
+            <th class="w-40 px-3 py-3">Stop reason</th>
+            <th class="w-64 px-3 py-3">Error summary</th>
+            <th class="w-52 px-3 py-3 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-zinc-800">
+          {% for job in history_jobs %}
+            <tr class="align-top hover:bg-zinc-950/60">
+              <td class="px-3 py-3 font-medium">
+                <div class="break-words">{{ job.live_name }}</div>
+                {% if job.archived_at %}<div class="mt-1 text-xs text-amber-300">Archived {{ display_dt(job.archived_at) }}</div>{% endif %}
+              </td>
+              <td class="px-3 py-3"><div class="break-words">{{ job.display_channel_name or job.channel_name }}</div></td>
+              <td class="px-3 py-3 text-zinc-400"><div class="break-words">{{ job.video_original_name }}</div></td>
+              <td class="px-3 py-3 text-zinc-400">{{ job.audio_playlist_name or "video original" }}</td>
+              <td class="px-3 py-3 text-zinc-400">{{ display_dt(job.started_at) }}</td>
+              <td class="px-3 py-3 text-zinc-400">{{ display_dt(job.stopped_at) }}</td>
+              <td class="px-3 py-3 text-zinc-300">{{ format_runtime_seconds(job_runtime_seconds(job)) }}</td>
+              <td class="px-3 py-3"><span class="inline-flex rounded-full border px-2 py-1 text-xs font-medium {{ status_badge_class(job.status) }}">{{ job.status }}</span></td>
+              <td class="px-3 py-3 text-zinc-400">{{ job.stop_reason or "-" }}</td>
+              <td class="px-3 py-3 text-xs text-red-300"><div class="break-words">{{ job.last_error or "-" }}</div>{% if job.exit_code is not none %}<div class="mt-1 text-zinc-500">Exit code: {{ job.exit_code }}</div>{% endif %}</td>
+              <td class="px-3 py-3">
+                <div class="flex flex-nowrap justify-end gap-2">
+                  <a href="/jobs/{{ job.id }}/logs" class="rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs font-medium hover:bg-zinc-800">Logs</a>
+                  <form method="post" action="/history/{{ job.id }}/restore"><button class="rounded-md bg-sky-700 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-sky-600">Duplicate</button></form>
+                  <form method="post" action="/history/{{ job.id }}/delete" onsubmit="return confirm('Delete this history record? Uploaded videos, audio, and playlists will not be deleted.');"><button class="rounded-md border border-red-900 px-2.5 py-1.5 text-xs font-medium text-red-300 hover:bg-red-950">Del</button></form>
+                </div>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="11" class="px-3 py-8 text-center text-zinc-500">No history records match the current filters.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -110,14 +110,14 @@ Uploaded videos are saved to `uploads/videos`. Uploaded audio is saved to `uploa
 
 The admin UI is split into tabs with a responsive dark dashboard layout:
 
-- `Dashboard`: summary stats, FFmpeg status, quick live job overview, and latest log preview.
+- `Dashboard`: summary stats, History summary for today, FFmpeg status, quick live job overview, and latest log preview.
 - `Channels`: channel records used by Live Jobs. A placeholder note is shown while the full channel workflow continues to evolve.
 - `Video Library`: MP4 upload and uploaded video list.
 - `Audio Library`: global MP3, WAV, and M4A uploads with duration, size, preview, and delete controls.
 - `Playlists`: per-channel song queues built from the global Audio Library.
-- `Live Jobs`: create live job form, live job table, and Start/Stop controls.
+- `Live Jobs`: create live job form, filters, queue controls, bulk actions, Start/Stop/Delete controls, and archive actions for completed jobs.
 - `Scheduler`: scheduling mode explanation and scheduled jobs overview.
-- `History`: placeholder for completed and failed live history, with a small current-job preview where available.
+- `History`: completed, stopped, failed, deleted, and archived live job records with filters, logs, duplicate-as-new, delete history record, and CSV export.
 - `Logs`: latest FFmpeg log and links to per-job logs.
 - `Settings`: app paths and FFmpeg diagnostics.
 
@@ -190,6 +190,70 @@ Live jobs support three scheduling modes:
 - `Start datetime + Duration`: set a start datetime and duration in minutes. The app previews the automatic finish time.
 
 Existing jobs remain compatible because the app still stores scheduling data in `start_at`, `end_at`, and `duration_minutes`.
+
+## Live Jobs Control Panel
+
+The `Live Jobs` tab includes advanced filtering and bulk controls for managing many streams.
+
+Filters:
+
+- channel
+- status
+- date from
+- date to
+- search by live name, channel name, or video filename
+- sort by newest, oldest, channel A-Z, status, or scheduled start time
+
+Bulk selection:
+
+- use each row checkbox to select jobs
+- use `Select All` to select every job currently visible in the filtered table
+- use `Unselect All` to clear the selection
+- the toolbar shows the current selected count
+
+Bulk actions:
+
+- `Start Selected`: starts selected jobs with status `stopped`, `queued`, `scheduled`, or `error`; running jobs are skipped.
+- `Stop Selected`: stops selected jobs only when they are running and have a saved PID; other jobs are skipped.
+- `Move Selected to Queue`: changes selected non-running jobs to `queued` without starting them.
+- `Archive Selected`: archives selected `done`, `stopped`, or `error` jobs to History.
+- `Delete Selected`: asks for confirmation, removes selected non-running live jobs from the active list, keeps the records in History, and skips running jobs.
+- `Archive completed jobs`: archives all visible or hidden active jobs with status `done`, `stopped`, or `error`.
+
+Deleting live jobs from the Live Jobs tab now archives the job record to History instead of deleting the row immediately. It does not delete uploaded videos, uploaded audio, prepared playlists, or playlist records. Use the History tab delete action when you want to remove a history record from SQLite.
+
+The `queued` status is useful for preparing a group of jobs before starting them manually or letting scheduled queued jobs start later when their start datetime is reached.
+
+## History And Job Statuses
+
+The `History` tab shows jobs that are finished, stopped, failed, deleted from Live Jobs, or archived. It includes summary cards, filters by channel/status/date/search, per-job logs, duplicate-as-new, delete history record, and CSV export for the current filters.
+
+Runtime lifecycle fields are stored in SQLite on `live_jobs`:
+
+- `started_at`
+- `stopped_at`
+- `expected_end_at`
+- `exit_code`
+- `stop_reason`
+- `last_error`
+- `archived_at`
+
+Status meanings:
+
+- `running`: FFmpeg was started and the app still expects the process to be alive.
+- `queued`: job is waiting to be started manually or by schedule.
+- `scheduled`: job has a future start time.
+- `stopped`: job was manually stopped or never started before its schedule ended.
+- `done`: job reached its expected end time, duration, or scheduler end.
+- `error`: FFmpeg could not start or exited unexpectedly before the expected end.
+- `archived`: not a separate stream result; the job has `archived_at` set, is hidden from Live Jobs, and remains visible in History with its final status.
+
+Stop reasons:
+
+- `manual_stop`: stopped by a user action.
+- `completed_duration`: stopped after the configured duration.
+- `scheduler_end`: stopped by the configured end datetime.
+- `process_error`: FFmpeg failed to start or exited unexpectedly.
 
 ## Access From Another Device On The Same WiFi
 

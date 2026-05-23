@@ -1,4 +1,6 @@
 import asyncio
+import csv
+import io
 import os
 import random
 import re
@@ -32,7 +34,9 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 SESSION_SECRET = os.getenv("APP_SECRET_KEY") or os.getenv("SESSION_SECRET") or "change-this-local-dev-secret"
 
 YOUTUBE_RTMP_BASE = "rtmp://a.rtmp.youtube.com/live2"
-STATUSES = {"scheduled", "running", "stopped", "error"}
+STATUSES = {"queued", "scheduled", "running", "stopped", "done", "error"}
+STARTABLE_STATUSES = {"queued", "scheduled", "stopped", "error"}
+FINAL_STATUSES = {"stopped", "done", "error"}
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -93,6 +97,37 @@ def format_duration_minutes(minutes: int | str | None) -> str:
         parts.append(f"{mins} menit")
     return " ".join(parts)
 
+def format_runtime_seconds(seconds: float | int | None) -> str:
+    if seconds in (None, ""):
+        return "-"
+    try:
+        total_seconds = max(0, int(seconds))
+    except (TypeError, ValueError):
+        return "-"
+    days, remainder = divmod(total_seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, secs = divmod(remainder, 60)
+    parts = []
+    if days:
+        parts.append(f"{days} hari")
+    if hours:
+        parts.append(f"{hours} jam")
+    if minutes:
+        parts.append(f"{minutes} menit")
+    if secs or not parts:
+        parts.append(f"{secs} detik")
+    return " ".join(parts)
+
+def job_runtime_seconds(job: dict[str, Any]) -> int | None:
+    started_at = parse_dt(job.get("started_at"))
+    stopped_at = parse_dt(job.get("stopped_at"))
+    if not started_at:
+        return None
+    end_value = stopped_at or (local_now() if job.get("status") == "running" else None)
+    if not end_value:
+        return None
+    return max(0, int((end_value - started_at).total_seconds()))
+
 def job_schedule_lines(job: dict[str, Any]) -> list[str]:
     start_value = parse_dt(job.get("start_at"))
     end_value = parse_dt(job.get("end_at"))
@@ -118,6 +153,25 @@ def job_schedule_lines(job: dict[str, Any]) -> list[str]:
     if duration:
         return ["Manual start", f"Duration: {int(duration)} menit"]
     return ["Manual start"]
+
+def running_duration(job: dict[str, Any]) -> str:
+    if job.get("status") != "running":
+        return "-"
+    started_at = parse_dt(job.get("started_at"))
+    if not started_at:
+        return "-"
+    minutes = max(0, int((local_now() - started_at).total_seconds() // 60))
+    return format_duration_minutes(minutes)
+
+def status_badge_class(status: str | None) -> str:
+    return {
+        "running": "bg-emerald-950 text-emerald-300 border-emerald-800",
+        "queued": "bg-sky-950 text-sky-300 border-sky-800",
+        "scheduled": "bg-indigo-950 text-indigo-300 border-indigo-800",
+        "stopped": "bg-zinc-800 text-zinc-300 border-zinc-700",
+        "done": "bg-teal-950 text-teal-300 border-teal-800",
+        "error": "bg-red-950 text-red-300 border-red-800",
+    }.get(status or "", "bg-zinc-800 text-zinc-300 border-zinc-700")
 
 def safe_filename(filename: str) -> str:
     name = Path(filename).name
@@ -199,7 +253,11 @@ def init_db() -> None:
                 updated_at TEXT NOT NULL,
                 started_at TEXT,
                 stopped_at TEXT,
+                expected_end_at TEXT,
+                exit_code INTEGER,
+                stop_reason TEXT,
                 last_error TEXT,
+                archived_at TEXT,
                 FOREIGN KEY(channel_id) REFERENCES channels(id),
                 FOREIGN KEY(audio_playlist_id) REFERENCES audio_playlists(id),
                 FOREIGN KEY(video_id) REFERENCES videos(id)
@@ -243,11 +301,27 @@ def init_db() -> None:
             conn.execute("ALTER TABLE live_jobs ADD COLUMN channel_id INTEGER")
         if "audio_playlist_id" not in columns:
             conn.execute("ALTER TABLE live_jobs ADD COLUMN audio_playlist_id INTEGER")
+        if "started_at" not in columns:
+            conn.execute("ALTER TABLE live_jobs ADD COLUMN started_at TEXT")
+        if "stopped_at" not in columns:
+            conn.execute("ALTER TABLE live_jobs ADD COLUMN stopped_at TEXT")
+        if "expected_end_at" not in columns:
+            conn.execute("ALTER TABLE live_jobs ADD COLUMN expected_end_at TEXT")
+        if "exit_code" not in columns:
+            conn.execute("ALTER TABLE live_jobs ADD COLUMN exit_code INTEGER")
+        if "stop_reason" not in columns:
+            conn.execute("ALTER TABLE live_jobs ADD COLUMN stop_reason TEXT")
+        if "last_error" not in columns:
+            conn.execute("ALTER TABLE live_jobs ADD COLUMN last_error TEXT")
+        if "archived_at" not in columns:
+            conn.execute("ALTER TABLE live_jobs ADD COLUMN archived_at TEXT")
         playlist_columns = {row["name"] for row in conn.execute("PRAGMA table_info(audio_playlists)").fetchall()}
         if "last_error" not in playlist_columns:
             conn.execute("ALTER TABLE audio_playlists ADD COLUMN last_error TEXT")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_live_jobs_channel_id ON live_jobs(channel_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_live_jobs_audio_playlist_id ON live_jobs(audio_playlist_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_live_jobs_archived_at ON live_jobs(archived_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_live_jobs_stopped_at ON live_jobs(stopped_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_audio_playlist_items_playlist_id ON audio_playlist_items(playlist_id)")
         conn.commit()
 
@@ -286,6 +360,14 @@ def clean_optional(value: str | None) -> str | None:
         return None
     cleaned = value.strip()
     return cleaned or None
+
+def parse_optional_int(value: str | int | None) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 def channel_name_exists(conn: sqlite3.Connection, name: str, exclude_id: int | None = None) -> bool:
     if exclude_id is None:
@@ -437,6 +519,18 @@ def live_duration_seconds_for_start(job: dict[str, Any], now: datetime) -> int |
     return None
 
 
+def expected_end_for_start(job: dict[str, Any], now: datetime) -> datetime | None:
+    end_at = parse_dt(job.get("end_at"))
+    if end_at:
+        return end_at
+    duration = job.get("duration_minutes")
+    if duration:
+        try:
+            return now + timedelta(minutes=int(duration))
+        except (TypeError, ValueError):
+            return None
+    return None
+
 def process_exists(pid: int | None) -> bool:
     if not pid:
         return False
@@ -457,6 +551,9 @@ def process_exists(pid: int | None) -> bool:
     except OSError:
         return False
 
+
+def process_exit_code(pid: int | None) -> int | None:
+    return None
 
 def stop_process(pid: int | None) -> tuple[bool, str]:
     if not pid:
@@ -498,8 +595,207 @@ def get_job(conn: sqlite3.Connection, job_id: int) -> dict[str, Any] | None:
     ).fetchone()
     return row_to_dict(row)
 
+def fetch_live_jobs(conn: sqlite3.Connection, filters: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    filters = filters or {}
+    where = ["live_jobs.archived_at IS NULL"]
+    params: list[Any] = []
+    channel_id = filters.get("channel_id", "").strip()
+    status = filters.get("status", "").strip()
+    date_from = filters.get("date_from", "").strip()
+    date_to = filters.get("date_to", "").strip()
+    search = filters.get("search", "").strip()
+    sort = filters.get("sort", "newest").strip() or "newest"
+
+    if channel_id:
+        where.append("live_jobs.channel_id = ?")
+        params.append(channel_id)
+    if status:
+        where.append("live_jobs.status = ?")
+        params.append(status)
+    if date_from:
+        where.append("date(COALESCE(live_jobs.start_at, live_jobs.created_at)) >= date(?)")
+        params.append(date_from)
+    if date_to:
+        where.append("date(COALESCE(live_jobs.start_at, live_jobs.created_at)) <= date(?)")
+        params.append(date_to)
+    if search:
+        like_value = f"%{search}%"
+        where.append(
+            """
+            (
+                live_jobs.live_name LIKE ?
+                OR COALESCE(channels.name, live_jobs.channel_name) LIKE ?
+                OR videos.original_name LIKE ?
+                OR videos.filename LIKE ?
+            )
+            """
+        )
+        params.extend([like_value, like_value, like_value, like_value])
+
+    order_by = {
+        "newest": "live_jobs.created_at DESC, live_jobs.id DESC",
+        "oldest": "live_jobs.created_at ASC, live_jobs.id ASC",
+        "channel_az": "display_channel_name COLLATE NOCASE ASC, live_jobs.created_at DESC",
+        "status": "live_jobs.status COLLATE NOCASE ASC, live_jobs.created_at DESC",
+        "scheduled_start": "CASE WHEN live_jobs.start_at IS NULL THEN 1 ELSE 0 END, live_jobs.start_at ASC, live_jobs.created_at DESC",
+    }.get(sort, "live_jobs.created_at DESC, live_jobs.id DESC")
+
+    where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+    return [
+        dict(row)
+        for row in conn.execute(
+            f"""
+            SELECT live_jobs.*, videos.filename AS video_filename, videos.original_name AS video_original_name,
+                   videos.path AS video_path,
+                   channels.name AS channel_table_name,
+                   channels.handle AS channel_handle,
+                   channels.is_active AS channel_is_active,
+                   COALESCE(channels.name, live_jobs.channel_name) AS display_channel_name,
+                   audio_playlists.name AS audio_playlist_name,
+                   audio_playlists.status AS audio_playlist_status,
+                   audio_playlists.prepared_audio_path AS prepared_audio_path,
+                   audio_playlists.total_duration_seconds AS audio_playlist_duration_seconds
+            FROM live_jobs
+            JOIN videos ON videos.id = live_jobs.video_id
+            LEFT JOIN channels ON channels.id = live_jobs.channel_id
+            LEFT JOIN audio_playlists ON audio_playlists.id = live_jobs.audio_playlist_id
+            {where_sql}
+            ORDER BY {order_by}
+            """,
+            params,
+        ).fetchall()
+    ]
+
+def fetch_history_jobs(conn: sqlite3.Connection, filters: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    filters = filters or {}
+    where = ["(live_jobs.status IN ('done', 'stopped', 'error') OR live_jobs.archived_at IS NOT NULL)"]
+    params: list[Any] = []
+    channel_id = filters.get("channel_id", "").strip()
+    status = filters.get("status", "").strip()
+    date_from = filters.get("date_from", "").strip()
+    date_to = filters.get("date_to", "").strip()
+    search = filters.get("search", "").strip()
+
+    if channel_id:
+        where.append("live_jobs.channel_id = ?")
+        params.append(channel_id)
+    if status:
+        if status == "archived":
+            where.append("live_jobs.archived_at IS NOT NULL")
+        else:
+            where.append("live_jobs.status = ?")
+            params.append(status)
+    if date_from:
+        where.append("date(COALESCE(live_jobs.stopped_at, live_jobs.archived_at, live_jobs.updated_at)) >= date(?)")
+        params.append(date_from)
+    if date_to:
+        where.append("date(COALESCE(live_jobs.stopped_at, live_jobs.archived_at, live_jobs.updated_at)) <= date(?)")
+        params.append(date_to)
+    if search:
+        like_value = f"%{search}%"
+        where.append(
+            """
+            (
+                live_jobs.live_name LIKE ?
+                OR videos.original_name LIKE ?
+                OR videos.filename LIKE ?
+                OR COALESCE(channels.name, live_jobs.channel_name) LIKE ?
+            )
+            """
+        )
+        params.extend([like_value, like_value, like_value, like_value])
+
+    return [
+        dict(row)
+        for row in conn.execute(
+            f"""
+            SELECT live_jobs.*, videos.filename AS video_filename, videos.original_name AS video_original_name,
+                   videos.path AS video_path,
+                   channels.name AS channel_table_name,
+                   channels.handle AS channel_handle,
+                   channels.is_active AS channel_is_active,
+                   COALESCE(channels.name, live_jobs.channel_name) AS display_channel_name,
+                   audio_playlists.name AS audio_playlist_name,
+                   audio_playlists.status AS audio_playlist_status,
+                   audio_playlists.prepared_audio_path AS prepared_audio_path,
+                   audio_playlists.total_duration_seconds AS audio_playlist_duration_seconds
+            FROM live_jobs
+            JOIN videos ON videos.id = live_jobs.video_id
+            LEFT JOIN channels ON channels.id = live_jobs.channel_id
+            LEFT JOIN audio_playlists ON audio_playlists.id = live_jobs.audio_playlist_id
+            WHERE {' AND '.join(where)}
+            ORDER BY COALESCE(live_jobs.stopped_at, live_jobs.archived_at, live_jobs.updated_at) DESC, live_jobs.id DESC
+            """,
+            params,
+        ).fetchall()
+    ]
+
+def history_summary(jobs: list[dict[str, Any]]) -> dict[str, Any]:
+    total_runtime_seconds = sum(job_runtime_seconds(job) or 0 for job in jobs)
+    return {
+        "completed": sum(1 for job in jobs if job.get("status") == "done"),
+        "stopped": sum(1 for job in jobs if job.get("status") == "stopped"),
+        "error": sum(1 for job in jobs if job.get("status") == "error"),
+        "total_duration": format_runtime_seconds(total_runtime_seconds),
+    }
+
+def dashboard_history_summary(conn: sqlite3.Connection) -> dict[str, Any]:
+    today = local_now().date().isoformat()
+    rows = [
+        dict(row)
+        for row in conn.execute(
+            """
+            SELECT live_jobs.*, videos.filename AS video_filename, videos.original_name AS video_original_name,
+                   COALESCE(channels.name, live_jobs.channel_name) AS display_channel_name
+            FROM live_jobs
+            JOIN videos ON videos.id = live_jobs.video_id
+            LEFT JOIN channels ON channels.id = live_jobs.channel_id
+            WHERE date(COALESCE(live_jobs.stopped_at, live_jobs.updated_at)) = date(?)
+            """,
+            (today,),
+        ).fetchall()
+    ]
+    last_finished = row_to_dict(
+        conn.execute(
+            """
+            SELECT live_jobs.*, videos.original_name AS video_original_name,
+                   COALESCE(channels.name, live_jobs.channel_name) AS display_channel_name
+            FROM live_jobs
+            JOIN videos ON videos.id = live_jobs.video_id
+            LEFT JOIN channels ON channels.id = live_jobs.channel_id
+            WHERE live_jobs.status IN ('done', 'stopped') AND live_jobs.stopped_at IS NOT NULL
+            ORDER BY live_jobs.stopped_at DESC, live_jobs.id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    )
+    last_failed = row_to_dict(
+        conn.execute(
+            """
+            SELECT live_jobs.*, videos.original_name AS video_original_name,
+                   COALESCE(channels.name, live_jobs.channel_name) AS display_channel_name
+            FROM live_jobs
+            JOIN videos ON videos.id = live_jobs.video_id
+            LEFT JOIN channels ON channels.id = live_jobs.channel_id
+            WHERE live_jobs.status = 'error'
+            ORDER BY COALESCE(live_jobs.stopped_at, live_jobs.updated_at) DESC, live_jobs.id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    )
+    return {
+        "today_completed": sum(1 for job in rows if job.get("status") == "done"),
+        "today_error": sum(1 for job in rows if job.get("status") == "error"),
+        "runtime_today": format_runtime_seconds(sum(job_runtime_seconds(job) or 0 for job in rows)),
+        "last_finished": last_finished,
+        "last_failed": last_failed,
+    }
+
 
 def get_stop_at(job: dict[str, Any]) -> datetime | None:
+    expected_end_at = parse_dt(job.get("expected_end_at"))
+    if expected_end_at:
+        return expected_end_at
     end_at = parse_dt(job.get("end_at"))
     if end_at:
         return end_at
@@ -550,9 +846,12 @@ def latest_any_log(conn: sqlite3.Connection) -> dict[str, Any] | None:
 
 def start_job(conn: sqlite3.Connection, job_id: int) -> tuple[bool, str]:
     job = get_job(conn, job_id)
-    now = dt_to_str(local_now())
+    now_value = local_now()
+    now = dt_to_str(now_value)
     if not job:
         return False, "Live job was not found."
+    if job.get("archived_at"):
+        return False, "Archived jobs must be restored or duplicated before starting."
     if job["status"] == "running" and process_exists(job.get("pid")):
         return True, "Live job is already running."
     ffmpeg_info = ffmpeg_probe()
@@ -583,7 +882,7 @@ def start_job(conn: sqlite3.Connection, job_id: int) -> tuple[bool, str]:
             return False, message
 
     if audio_path:
-        duration_seconds = live_duration_seconds_for_start(job, local_now())
+        duration_seconds = live_duration_seconds_for_start(job, now_value)
         cmd = [
             ffmpeg_info["path"],
             "-hide_banner",
@@ -667,14 +966,16 @@ def start_job(conn: sqlite3.Connection, job_id: int) -> tuple[bool, str]:
                 stderr=subprocess.STDOUT,
                 creationflags=flags,
             )
+        expected_end_at = expected_end_for_start(job, now_value)
         conn.execute(
             """
             UPDATE live_jobs
             SET status = 'running', pid = ?, started_at = ?, stopped_at = NULL,
+                expected_end_at = ?, exit_code = NULL, stop_reason = NULL,
                 last_error = NULL, updated_at = ?
             WHERE id = ?
             """,
-            (process.pid, now, now, job_id),
+            (process.pid, now, dt_to_str(expected_end_at), now, job_id),
         )
         conn.commit()
         return True, f"FFmpeg started with PID {process.pid}."
@@ -684,40 +985,107 @@ def start_job(conn: sqlite3.Connection, job_id: int) -> tuple[bool, str]:
         return False, message
 
 
-def stop_job(conn: sqlite3.Connection, job_id: int, status: str = "stopped") -> tuple[bool, str]:
-    job = get_job(conn, job_id)
+def complete_stopped_job(
+    conn: sqlite3.Connection,
+    job_id: int,
+    status: str,
+    stop_reason: str,
+    message: str,
+    exit_code: int | None = None,
+) -> tuple[bool, str]:
     now = dt_to_str(local_now())
+    with log_path(job_id).open("ab") as log_file:
+        log_file.write(f"\n[{now}] {message}\n".encode("utf-8"))
+    conn.execute(
+        """
+        UPDATE live_jobs
+        SET status = ?, pid = NULL, stopped_at = ?, exit_code = ?,
+            stop_reason = ?, last_error = CASE WHEN ? = 'error' THEN COALESCE(last_error, ?) ELSE NULL END,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (status, now, exit_code, stop_reason, status, message, now, job_id),
+    )
+    conn.commit()
+    return True, message
+
+def stop_job(conn: sqlite3.Connection, job_id: int, stop_reason: str = "manual_stop") -> tuple[bool, str]:
+    job = get_job(conn, job_id)
     if not job:
         return False, "Live job was not found."
+    if job.get("archived_at"):
+        return False, "Archived jobs cannot be stopped."
     ok, message = stop_process(job.get("pid"))
     if ok:
-        with log_path(job_id).open("ab") as log_file:
-            log_file.write(f"\n[{now}] {message}\n".encode("utf-8"))
-        conn.execute(
-            """
-            UPDATE live_jobs
-            SET status = ?, pid = NULL, stopped_at = ?, updated_at = ?
-            WHERE id = ?
-            """,
-            (status, now, now, job_id),
-        )
-        conn.commit()
-        return True, message
+        final_status = "done" if stop_reason in {"completed_duration", "scheduler_end"} else "stopped"
+        return complete_stopped_job(conn, job_id, final_status, stop_reason, message)
     update_job_error(conn, job_id, message)
     return False, message
 
 
-def update_job_error(conn: sqlite3.Connection, job_id: int, message: str) -> None:
+def update_job_error(conn: sqlite3.Connection, job_id: int, message: str, exit_code: int | None = None) -> None:
     now = dt_to_str(local_now())
     conn.execute(
         """
         UPDATE live_jobs
-        SET status = 'error', pid = NULL, last_error = ?, updated_at = ?
+        SET status = 'error', pid = NULL, stopped_at = COALESCE(stopped_at, ?),
+            exit_code = ?, stop_reason = 'process_error', last_error = ?, updated_at = ?
         WHERE id = ?
         """,
-        (message, now, job_id),
+        (now, exit_code, message, now, job_id),
     )
     conn.commit()
+
+def archive_job(conn: sqlite3.Connection, job_id: int, reason: str = "archived") -> tuple[bool, str]:
+    job = get_job(conn, job_id)
+    if not job:
+        return False, "Live job was not found."
+    if job.get("status") == "running":
+        return False, "Running live jobs cannot be archived. Stop the job first."
+    now = dt_to_str(local_now())
+    conn.execute(
+        """
+        UPDATE live_jobs
+        SET archived_at = COALESCE(archived_at, ?),
+            stop_reason = COALESCE(stop_reason, ?),
+            stopped_at = CASE WHEN status IN ('done', 'stopped', 'error') THEN COALESCE(stopped_at, ?) ELSE stopped_at END,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (now, reason, now, now, job_id),
+    )
+    conn.commit()
+    return True, "Live job archived to History."
+
+def duplicate_job_as_new(conn: sqlite3.Connection, job_id: int) -> tuple[bool, str]:
+    job = get_job(conn, job_id)
+    if not job:
+        return False, "History record was not found."
+    now = dt_to_str(local_now())
+    db_cursor = conn.execute(
+        """
+        INSERT INTO live_jobs (
+            live_name, channel_name, channel_id, video_id, audio_playlist_id, stream_key,
+            start_at, end_at, duration_minutes, status, pid, created_at, updated_at,
+            started_at, stopped_at, expected_end_at, exit_code, stop_reason, last_error, archived_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, 'stopped', NULL, ?, ?,
+                NULL, NULL, NULL, NULL, NULL, NULL, NULL)
+        """,
+        (
+            f"{job['live_name']} copy",
+            job["channel_name"],
+            job.get("channel_id"),
+            job["video_id"],
+            job.get("audio_playlist_id"),
+            job["stream_key"],
+            job.get("duration_minutes"),
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    return True, f"History job duplicated as Live Job #{db_cursor.lastrowid}."
 
 
 async def scheduler_loop() -> None:
@@ -739,7 +1107,8 @@ def run_scheduler_once() -> None:
                 SELECT live_jobs.*, videos.path AS video_path, videos.filename AS video_filename
                 FROM live_jobs
                 JOIN videos ON videos.id = live_jobs.video_id
-                WHERE status IN ('scheduled', 'running')
+                WHERE status IN ('queued', 'scheduled', 'running')
+                  AND live_jobs.archived_at IS NULL
                 """
             ).fetchall()
         ]
@@ -749,10 +1118,16 @@ def run_scheduler_once() -> None:
             if status == "running":
                 stop_at = get_stop_at(job)
                 if stop_at and now >= stop_at:
-                    stop_job(conn, job_id)
+                    reason = "scheduler_end" if job.get("end_at") else "completed_duration"
+                    stop_job(conn, job_id, reason)
                     continue
                 if job.get("pid") and not process_exists(job.get("pid")):
-                    update_job_error(conn, job_id, "FFmpeg process exited unexpectedly.")
+                    exit_code = process_exit_code(job.get("pid"))
+                    if stop_at and now >= stop_at:
+                        reason = "scheduler_end" if job.get("end_at") else "completed_duration"
+                        complete_stopped_job(conn, job_id, "done", reason, "FFmpeg process completed.")
+                    else:
+                        update_job_error(conn, job_id, "FFmpeg process exited unexpectedly.", exit_code)
                 continue
 
             start_at = parse_dt(job.get("start_at"))
@@ -761,10 +1136,12 @@ def run_scheduler_once() -> None:
                 conn.execute(
                     """
                     UPDATE live_jobs
-                    SET status = 'stopped', updated_at = ?, last_error = NULL
+                    SET status = 'stopped', stopped_at = COALESCE(stopped_at, ?),
+                        expected_end_at = COALESCE(expected_end_at, ?),
+                        stop_reason = 'scheduler_end', updated_at = ?, last_error = NULL
                     WHERE id = ?
                     """,
-                    (dt_to_str(now), job_id),
+                    (dt_to_str(now), dt_to_str(end_at), dt_to_str(now), job_id),
                 )
                 conn.commit()
                 continue
@@ -1272,30 +1649,11 @@ def admin_context(
     page_title: str,
     message: str | None = None,
     error: str | None = None,
+    job_filters: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     videos = [dict(row) for row in db.execute("SELECT * FROM videos ORDER BY uploaded_at DESC").fetchall()]
-    jobs = [
-        dict(row)
-        for row in db.execute(
-            """
-            SELECT live_jobs.*, videos.filename AS video_filename, videos.original_name AS video_original_name,
-                   videos.path AS video_path,
-                   channels.name AS channel_table_name,
-                   channels.handle AS channel_handle,
-                   channels.is_active AS channel_is_active,
-                   COALESCE(channels.name, live_jobs.channel_name) AS display_channel_name,
-                   audio_playlists.name AS audio_playlist_name,
-                   audio_playlists.status AS audio_playlist_status,
-                   audio_playlists.prepared_audio_path AS prepared_audio_path,
-                   audio_playlists.total_duration_seconds AS audio_playlist_duration_seconds
-            FROM live_jobs
-            JOIN videos ON videos.id = live_jobs.video_id
-            LEFT JOIN channels ON channels.id = live_jobs.channel_id
-            LEFT JOIN audio_playlists ON audio_playlists.id = live_jobs.audio_playlist_id
-            ORDER BY live_jobs.created_at DESC
-            """
-        ).fetchall()
-    ]
+    jobs = fetch_live_jobs(db, job_filters if active_tab == "live_jobs" else None)
+    history_jobs = fetch_history_jobs(db, job_filters if active_tab == "history" else None)
     channels = [
         dict(row)
         for row in db.execute(
@@ -1379,7 +1737,9 @@ def admin_context(
     scheduled_jobs = [
         job for job in jobs if job.get("status") == "scheduled" or job.get("start_at") or job.get("end_at")
     ]
-    completed_jobs = [job for job in jobs if job.get("status") in {"stopped", "error"}]
+    completed_jobs = [job for job in history_jobs if job.get("status") in FINAL_STATUSES]
+    history_totals = history_summary(history_jobs)
+    dashboard_history = dashboard_history_summary(db)
     return {
         "request": request,
         "nav_items": NAV_ITEMS,
@@ -1387,8 +1747,14 @@ def admin_context(
         "page_title": page_title,
         "videos": videos,
         "jobs": jobs,
+        "history_jobs": history_jobs,
+        "job_filters": job_filters or {},
+        "job_statuses": ["queued", "scheduled", "running", "stopped", "done", "error"],
+        "history_statuses": ["done", "stopped", "error", "archived"],
         "scheduled_jobs": scheduled_jobs,
         "completed_jobs": completed_jobs,
+        "history_totals": history_totals,
+        "dashboard_history": dashboard_history,
         "channels": channels,
         "active_channels": active_channels,
         "audio_assets": audio_assets,
@@ -1405,6 +1771,10 @@ def admin_context(
         "display_dt_local": display_dt_local,
         "format_duration_minutes": format_duration_minutes,
         "format_seconds": format_seconds,
+        "format_runtime_seconds": format_runtime_seconds,
+        "job_runtime_seconds": job_runtime_seconds,
+        "running_duration": running_duration,
+        "status_badge_class": status_badge_class,
         "job_schedule_lines": job_schedule_lines,
         "audio_playlist_log_text": audio_playlist_log_text,
         "mask_secret": mask_secret,
@@ -1424,10 +1794,11 @@ def render_admin(
     page_title: str,
     message: str | None = None,
     error: str | None = None,
+    job_filters: dict[str, str] | None = None,
 ) -> HTMLResponse:
     return templates.TemplateResponse(
         template_name,
-        admin_context(request, db, active_tab, page_title, message, error),
+        admin_context(request, db, active_tab, page_title, message, error, job_filters),
     )
 
 @app.get("/", response_class=HTMLResponse)
@@ -1497,8 +1868,22 @@ def live_jobs_page(
     _: None = Depends(require_admin),
     message: str | None = None,
     error: str | None = None,
+    channel_id: str = "",
+    status: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    search: str = "",
+    sort: str = "newest",
 ):
-    return render_admin("live_jobs.html", request, db, "live_jobs", "Live Jobs", message, error)
+    job_filters = {
+        "channel_id": channel_id,
+        "status": status,
+        "date_from": date_from,
+        "date_to": date_to,
+        "search": search,
+        "sort": sort,
+    }
+    return render_admin("live_jobs.html", request, db, "live_jobs", "Live Jobs", message, error, job_filters)
 
 @app.get("/scheduler", response_class=HTMLResponse)
 def scheduler_page(
@@ -1517,8 +1902,72 @@ def history_page(
     _: None = Depends(require_admin),
     message: str | None = None,
     error: str | None = None,
+    channel_id: str = "",
+    status: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    search: str = "",
 ):
-    return render_admin("placeholder.html", request, db, "history", "History", message, error)
+    job_filters = {
+        "channel_id": channel_id,
+        "status": status,
+        "date_from": date_from,
+        "date_to": date_to,
+        "search": search,
+    }
+    return render_admin("history.html", request, db, "history", "History", message, error, job_filters)
+
+@app.get("/history/export.csv")
+def history_export_csv(
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+    channel_id: str = "",
+    status: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    search: str = "",
+):
+    jobs = fetch_history_jobs(
+        db,
+        {
+            "channel_id": channel_id,
+            "status": status,
+            "date_from": date_from,
+            "date_to": date_to,
+            "search": search,
+        },
+    )
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Live name",
+        "Channel",
+        "Video",
+        "Audio playlist",
+        "Started at",
+        "Stopped at",
+        "Duration ran",
+        "Final status",
+        "Stop reason",
+        "Exit code",
+        "Error summary",
+    ])
+    for job in jobs:
+        writer.writerow([
+            job.get("live_name") or "",
+            job.get("display_channel_name") or job.get("channel_name") or "",
+            job.get("video_original_name") or "",
+            job.get("audio_playlist_name") or "",
+            job.get("started_at") or "",
+            job.get("stopped_at") or "",
+            format_runtime_seconds(job_runtime_seconds(job)),
+            job.get("status") or "",
+            job.get("stop_reason") or "",
+            job.get("exit_code") if job.get("exit_code") is not None else "",
+            job.get("last_error") or "",
+        ])
+    headers = {"Content-Disposition": "attachment; filename=live_history.csv"}
+    return Response(output.getvalue(), media_type="text/csv", headers=headers)
 
 @app.get("/logs", response_class=HTMLResponse)
 def logs_page(
@@ -1568,9 +2017,9 @@ def upload_video(
 def create_job(
     request: Request,
     live_name: str = Form(...),
-    channel_id: int | None = Form(None),
-    video_id: int = Form(...),
-    audio_playlist_id: int | None = Form(None),
+    channel_id: str = Form(""),
+    video_id: str = Form(""),
+    audio_playlist_id: str = Form(""),
     stream_key: str = Form(""),
     schedule_mode: str = Form("manual_now"),
     start_at: str | None = Form(None),
@@ -1581,9 +2030,12 @@ def create_job(
     _: None = Depends(require_admin),
 ):
     clean_live_name = live_name.strip()
-    if channel_id is None:
+    selected_channel_id = parse_optional_int(channel_id)
+    selected_video_id = parse_optional_int(video_id)
+    selected_audio_playlist_value = parse_optional_int(audio_playlist_id)
+    if selected_channel_id is None:
         return redirect(f"/live-jobs?{urlencode({'error': 'Select an active channel first.'})}")
-    channel = db.execute("SELECT * FROM channels WHERE id = ? AND is_active = 1", (channel_id,)).fetchone()
+    channel = db.execute("SELECT * FROM channels WHERE id = ? AND is_active = 1", (selected_channel_id,)).fetchone()
     if not channel:
         return redirect(f"/live-jobs?{urlencode({'error': 'Select an active channel first.'})}")
     clean_channel_name = channel["name"]
@@ -1592,25 +2044,27 @@ def create_job(
         return redirect("/live-jobs?error=Live%20name,%20channel,%20and%20stream%20key%20are%20required")
     if status not in STATUSES - {"running"}:
         status = "stopped"
-    video = db.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
+    if selected_video_id is None:
+        return redirect("/live-jobs?error=Select%20an%20uploaded%20video%20first")
+    video = db.execute("SELECT * FROM videos WHERE id = ?", (selected_video_id,)).fetchone()
     if not video:
         return redirect("/live-jobs?error=Selected%20video%20was%20not%20found")
     if not Path(video["path"]).exists():
         return redirect("/live-jobs?error=Selected%20video%20file%20does%20not%20exist")
     selected_audio_playlist_id = None
-    if audio_playlist_id:
+    if selected_audio_playlist_value:
         playlist = db.execute(
             """
             SELECT * FROM audio_playlists
             WHERE id = ? AND channel_id = ? AND status = 'ready' AND prepared_audio_path IS NOT NULL
             """,
-            (audio_playlist_id, channel_id),
+            (selected_audio_playlist_value, selected_channel_id),
         ).fetchone()
         if not playlist:
             return redirect(f"/live-jobs?{urlencode({'error': 'Selected audio playlist is not ready for this channel.'})}")
         if not Path(playlist["prepared_audio_path"]).exists():
             return redirect(f"/live-jobs?{urlencode({'error': 'Prepared audio playlist file is missing.'})}")
-        selected_audio_playlist_id = audio_playlist_id
+        selected_audio_playlist_id = selected_audio_playlist_value
     if schedule_mode not in {"manual_now", "start_end", "start_duration"}:
         schedule_mode = "manual_now"
     try:
@@ -1663,8 +2117,8 @@ def create_job(
         (
             clean_live_name,
             clean_channel_name,
-            channel_id,
-            video_id,
+            selected_channel_id,
+            selected_video_id,
             selected_audio_playlist_id,
             clean_stream_key,
             dt_to_str(start_value),
@@ -1690,6 +2144,135 @@ def start_live(job_id: int, db: sqlite3.Connection = Depends(get_db), _: None = 
 def stop_live(job_id: int, db: sqlite3.Connection = Depends(get_db), _: None = Depends(require_admin)):
     ok, message = stop_job(db, job_id)
     key = "message" if ok else "error"
+    return redirect(f"/live-jobs?{urlencode({key: message})}")
+
+
+@app.post("/jobs/{job_id}/delete")
+def delete_live_job(job_id: int, db: sqlite3.Connection = Depends(get_db), _: None = Depends(require_admin)):
+    ok, message = archive_job(db, job_id, "deleted_from_live_jobs")
+    key = "message" if ok else "error"
+    return redirect(f"/live-jobs?{urlencode({key: message})}")
+
+@app.post("/jobs/{job_id}/archive")
+def archive_live_job(job_id: int, db: sqlite3.Connection = Depends(get_db), _: None = Depends(require_admin)):
+    ok, message = archive_job(db, job_id)
+    key = "message" if ok else "error"
+    return redirect(f"/live-jobs?{urlencode({key: message})}")
+
+@app.post("/jobs/archive-completed")
+def archive_completed_jobs(db: sqlite3.Connection = Depends(get_db), _: None = Depends(require_admin)):
+    now = dt_to_str(local_now())
+    cursor = db.execute(
+        """
+        UPDATE live_jobs
+        SET archived_at = COALESCE(archived_at, ?), updated_at = ?
+        WHERE archived_at IS NULL AND status IN ('done', 'stopped', 'error')
+        """,
+        (now, now),
+    )
+    db.commit()
+    return redirect(f"/live-jobs?{urlencode({'message': f'Archived {cursor.rowcount} completed jobs to History.'})}")
+
+@app.post("/history/{job_id}/restore")
+def restore_history_job(job_id: int, db: sqlite3.Connection = Depends(get_db), _: None = Depends(require_admin)):
+    ok, message = duplicate_job_as_new(db, job_id)
+    key = "message" if ok else "error"
+    return redirect(f"/history?{urlencode({key: message})}")
+
+@app.post("/history/{job_id}/delete")
+def delete_history_job(job_id: int, db: sqlite3.Connection = Depends(get_db), _: None = Depends(require_admin)):
+    job = get_job(db, job_id)
+    if not job:
+        return redirect(f"/history?{urlencode({'error': 'History record was not found.'})}")
+    if job.get("status") == "running":
+        return redirect(f"/history?{urlencode({'error': 'Running jobs cannot be deleted from History.'})}")
+    db.execute("DELETE FROM live_jobs WHERE id = ?", (job_id,))
+    db.commit()
+    return redirect(f"/history?{urlencode({'message': 'History record deleted.'})}")
+
+
+@app.post("/jobs/bulk")
+def bulk_live_jobs(
+    action: str = Form(...),
+    job_ids: list[int] = Form(default=[]),
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    selected_ids = list(dict.fromkeys(job_ids))
+    if not selected_ids:
+        return redirect(f"/live-jobs?{urlencode({'error': 'Select at least one live job first.'})}")
+
+    started = stopped = queued = deleted = archived = skipped = failed = 0
+    for job_id in selected_ids:
+        job = get_job(db, job_id)
+        if not job:
+            failed += 1
+            continue
+
+        if action == "start":
+            if job.get("status") not in STARTABLE_STATUSES:
+                skipped += 1
+                continue
+            ok, _ = start_job(db, job_id)
+            if ok:
+                started += 1
+            else:
+                failed += 1
+        elif action == "stop":
+            if job.get("status") != "running" or not job.get("pid"):
+                skipped += 1
+                continue
+            ok, _ = stop_job(db, job_id)
+            if ok:
+                stopped += 1
+            else:
+                failed += 1
+        elif action == "queue":
+            if job.get("status") == "running":
+                skipped += 1
+                continue
+            db.execute(
+                """
+                UPDATE live_jobs
+                SET status = 'queued', pid = NULL, last_error = NULL, updated_at = ?
+                WHERE id = ?
+                """,
+                (dt_to_str(local_now()), job_id),
+            )
+            queued += 1
+        elif action == "delete":
+            if job.get("status") == "running":
+                skipped += 1
+                continue
+            ok, _ = archive_job(db, job_id, "deleted_from_live_jobs")
+            if not ok:
+                failed += 1
+                continue
+            deleted += 1
+        elif action == "archive":
+            if job.get("status") not in FINAL_STATUSES or job.get("archived_at"):
+                skipped += 1
+                continue
+            ok, _ = archive_job(db, job_id)
+            if ok:
+                archived += 1
+            else:
+                failed += 1
+        else:
+            return redirect(f"/live-jobs?{urlencode({'error': 'Unknown bulk action.'})}")
+
+    db.commit()
+    if action == "start":
+        message = f"Bulk start summary: started {started}, skipped {skipped}, failed {failed}."
+    elif action == "stop":
+        message = f"Bulk stop summary: stopped {stopped}, skipped {skipped}, failed {failed}."
+    elif action == "queue":
+        message = f"Bulk queue summary: queued {queued}, skipped {skipped}, failed {failed}."
+    elif action == "delete":
+        message = f"Bulk delete summary: archived {deleted} to History, skipped {skipped}, failed {failed}."
+    else:
+        message = f"Bulk archive summary: archived {archived}, skipped {skipped}, failed {failed}."
+    key = "error" if failed and not any([started, stopped, queued, deleted, archived]) else "message"
     return redirect(f"/live-jobs?{urlencode({key: message})}")
 
 
