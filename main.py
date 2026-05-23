@@ -194,6 +194,29 @@ def job_schedule_lines(job: dict[str, Any]) -> list[str]:
         return ["Manual start", f"Duration: {int(duration)} menit"]
     return ["Manual start"]
 
+def schedule_mode_label(job: dict[str, Any]) -> str:
+    if job.get("start_at") and job.get("end_at"):
+        return "Start & End datetime"
+    if job.get("start_at") and job.get("duration_minutes"):
+        return "Start datetime + Duration"
+    return "Manual start"
+
+def time_until_start(job: dict[str, Any]) -> str:
+    if job.get("status") == "running":
+        stop_at = get_stop_at(job)
+        if stop_at:
+            seconds = int((stop_at - local_now()).total_seconds())
+            if seconds > 0:
+                return f"Ends in {format_runtime_seconds(seconds)}"
+        return "Running"
+    start_at = parse_dt(job.get("start_at"))
+    if not start_at:
+        return "-"
+    seconds = int((start_at - local_now()).total_seconds())
+    if seconds <= 0:
+        return "Due now"
+    return format_runtime_seconds(seconds)
+
 def running_duration(job: dict[str, Any]) -> str:
     if job.get("status") != "running":
         return "-"
@@ -897,6 +920,72 @@ def fetch_history_jobs(conn: sqlite3.Connection, filters: dict[str, str] | None 
             LEFT JOIN audio_playlists ON audio_playlists.id = live_jobs.audio_playlist_id
             WHERE {' AND '.join(where)}
             ORDER BY COALESCE(live_jobs.stopped_at, live_jobs.archived_at, live_jobs.updated_at) DESC, live_jobs.id DESC
+            """,
+            params,
+        ).fetchall()
+    ]
+
+def fetch_scheduler_jobs(conn: sqlite3.Connection, filters: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    filters = filters or {}
+    where = [
+        "live_jobs.archived_at IS NULL",
+        "(live_jobs.status IN ('queued', 'scheduled', 'running') OR live_jobs.start_at IS NOT NULL OR live_jobs.end_at IS NOT NULL OR live_jobs.duration_minutes IS NOT NULL)",
+    ]
+    params: list[Any] = []
+    channel_id = filters.get("channel_id", "").strip()
+    status = filters.get("status", "").strip()
+    date_from = filters.get("date_from", "").strip()
+    date_to = filters.get("date_to", "").strip()
+    search = filters.get("search", "").strip()
+
+    if channel_id:
+        where.append("live_jobs.channel_id = ?")
+        params.append(channel_id)
+    if status:
+        where.append("live_jobs.status = ?")
+        params.append(status)
+    if date_from:
+        where.append("date(COALESCE(live_jobs.start_at, live_jobs.created_at)) >= date(?)")
+        params.append(date_from)
+    if date_to:
+        where.append("date(COALESCE(live_jobs.start_at, live_jobs.created_at)) <= date(?)")
+        params.append(date_to)
+    if search:
+        like_value = f"%{search}%"
+        where.append(
+            """
+            (
+                live_jobs.live_name LIKE ?
+                OR COALESCE(channels.name, live_jobs.channel_name) LIKE ?
+                OR videos.original_name LIKE ?
+                OR videos.filename LIKE ?
+            )
+            """
+        )
+        params.extend([like_value, like_value, like_value, like_value])
+
+    return [
+        dict(row)
+        for row in conn.execute(
+            f"""
+            SELECT live_jobs.*, videos.filename AS video_filename, videos.original_name AS video_original_name,
+                   videos.path AS video_path,
+                   channels.name AS channel_table_name,
+                   channels.handle AS channel_handle,
+                   channels.is_active AS channel_is_active,
+                   COALESCE(channels.name, live_jobs.channel_name) AS display_channel_name,
+                   audio_playlists.name AS audio_playlist_name,
+                   audio_playlists.status AS audio_playlist_status,
+                   audio_playlists.prepared_audio_path AS prepared_audio_path,
+                   audio_playlists.total_duration_seconds AS audio_playlist_duration_seconds
+            FROM live_jobs
+            JOIN videos ON videos.id = live_jobs.video_id
+            LEFT JOIN channels ON channels.id = live_jobs.channel_id
+            LEFT JOIN audio_playlists ON audio_playlists.id = live_jobs.audio_playlist_id
+            WHERE {' AND '.join(where)}
+            ORDER BY CASE WHEN live_jobs.start_at IS NULL THEN 1 ELSE 0 END,
+                     live_jobs.start_at ASC,
+                     live_jobs.created_at DESC
             """,
             params,
         ).fetchall()
@@ -1854,6 +1943,7 @@ def admin_context(
     videos = fetch_videos_with_usage(db)
     jobs = annotate_job_file_state(fetch_live_jobs(db, job_filters if active_tab == "live_jobs" else None))
     history_jobs = annotate_job_file_state(fetch_history_jobs(db, job_filters if active_tab == "history" else None))
+    scheduler_jobs = annotate_job_file_state(fetch_scheduler_jobs(db, job_filters if active_tab == "scheduler" else None))
     channels = [
         dict(row)
         for row in db.execute(
@@ -1934,9 +2024,7 @@ def admin_context(
     for job in jobs:
         if not Path(job["video_path"]).exists():
             warnings.append(f"Video file missing for job '{job['live_name']}': {job['video_filename']}")
-    scheduled_jobs = [
-        job for job in jobs if job.get("status") == "scheduled" or job.get("start_at") or job.get("end_at")
-    ]
+    scheduled_jobs = scheduler_jobs
     completed_jobs = [job for job in history_jobs if job.get("status") in FINAL_STATUSES]
     history_totals = history_summary(history_jobs)
     dashboard_history = dashboard_history_summary(db)
@@ -1953,6 +2041,7 @@ def admin_context(
         "job_filters": job_filters or {},
         "job_statuses": ["queued", "scheduled", "running", "stopped", "done", "error"],
         "history_statuses": ["done", "stopped", "error", "archived"],
+        "scheduler_statuses": ["queued", "scheduled", "running", "stopped", "done", "error"],
         "scheduled_jobs": scheduled_jobs,
         "completed_jobs": completed_jobs,
         "history_totals": history_totals,
@@ -1981,6 +2070,8 @@ def admin_context(
         "running_duration": running_duration,
         "status_badge_class": status_badge_class,
         "job_schedule_lines": job_schedule_lines,
+        "schedule_mode_label": schedule_mode_label,
+        "time_until_start": time_until_start,
         "audio_playlist_log_text": audio_playlist_log_text,
         "mask_secret": mask_secret,
         "admin_username": ADMIN_USERNAME,
@@ -2097,8 +2188,155 @@ def scheduler_page(
     _: None = Depends(require_admin),
     message: str | None = None,
     error: str | None = None,
+    channel_id: str = "",
+    status: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    search: str = "",
 ):
-    return render_admin("scheduler.html", request, db, "scheduler", "Scheduler", message, error)
+    job_filters = {
+        "channel_id": channel_id,
+        "status": status,
+        "date_from": date_from,
+        "date_to": date_to,
+        "search": search,
+    }
+    return render_admin("scheduler.html", request, db, "scheduler", "Scheduler", message, error, job_filters)
+
+@app.post("/scheduler/bulk")
+def scheduler_bulk_action(
+    action: str = Form(...),
+    job_ids: list[int] = Form(default=[]),
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    selected_ids = list(dict.fromkeys(job_ids))
+    if not selected_ids:
+        return redirect(f"/scheduler?{urlencode({'error': 'Select at least one scheduled job first.'})}")
+
+    started = stopped = canceled = skipped = failed = 0
+    for job_id in selected_ids:
+        job = get_job(db, job_id)
+        if not job:
+            failed += 1
+            continue
+
+        if action == "start":
+            if job.get("status") == "running":
+                skipped += 1
+                continue
+            ok, _ = start_job(db, job_id)
+            if ok:
+                started += 1
+            else:
+                failed += 1
+        elif action == "stop":
+            if job.get("status") != "running":
+                skipped += 1
+                continue
+            ok, _ = stop_job(db, job_id)
+            if ok:
+                stopped += 1
+            else:
+                failed += 1
+        elif action == "cancel":
+            if job.get("status") == "running":
+                skipped += 1
+                continue
+            if job.get("status") not in {"queued", "scheduled"}:
+                skipped += 1
+                continue
+            db.execute(
+                """
+                UPDATE live_jobs
+                SET status = 'stopped', start_at = NULL, end_at = NULL, duration_minutes = NULL,
+                    expected_end_at = NULL, stop_reason = NULL, last_error = NULL, updated_at = ?
+                WHERE id = ?
+                """,
+                (dt_to_str(local_now()), job_id),
+            )
+            canceled += 1
+        else:
+            return redirect(f"/scheduler?{urlencode({'error': 'Unknown scheduler action.'})}")
+
+    db.commit()
+    if action == "start":
+        message = f"Scheduler start summary: started {started}, skipped {skipped}, failed {failed}."
+    elif action == "stop":
+        message = f"Scheduler stop summary: stopped {stopped}, skipped {skipped}, failed {failed}."
+    else:
+        message = f"Scheduler cancel summary: canceled {canceled}, skipped {skipped}, failed {failed}."
+    key = "error" if failed and not any([started, stopped, canceled]) else "message"
+    return redirect(f"/scheduler?{urlencode({key: message})}")
+
+@app.post("/scheduler/{job_id}/schedule")
+def update_scheduler_job(
+    job_id: int,
+    schedule_mode: str = Form("manual_now"),
+    start_at: str | None = Form(None),
+    end_at: str | None = Form(None),
+    duration_minutes: str | None = Form(None),
+    status: str = Form("stopped"),
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    job = get_job(db, job_id)
+    if not job:
+        return redirect(f"/scheduler?{urlencode({'error': 'Live job was not found.'})}")
+    if job.get("status") == "running":
+        return redirect(f"/scheduler?{urlencode({'error': 'Stop the running job before editing its schedule.'})}")
+    if schedule_mode not in {"manual_now", "start_end", "start_duration"}:
+        schedule_mode = "manual_now"
+    try:
+        start_value = parse_dt(start_at) if start_at else None
+        end_value = parse_dt(end_at) if end_at else None
+    except ValueError:
+        return redirect(f"/scheduler?{urlencode({'error': 'Invalid schedule date or time.'})}")
+
+    duration_value = None
+    if duration_minutes:
+        try:
+            duration_value = int(duration_minutes)
+            if duration_value <= 0:
+                raise ValueError
+        except ValueError:
+            return redirect(f"/scheduler?{urlencode({'error': 'Duration minutes must be a positive number.'})}")
+
+    if schedule_mode == "manual_now":
+        start_value = None
+        end_value = None
+        duration_value = None
+        status = "stopped"
+    elif schedule_mode == "start_end":
+        if not start_value or not end_value:
+            return redirect(f"/scheduler?{urlencode({'error': 'Start datetime and end datetime are required.'})}")
+        if end_value <= start_value:
+            return redirect(f"/scheduler?{urlencode({'error': 'End datetime must be after start datetime.'})}")
+        duration_value = duration_between_minutes(start_value, end_value)
+        if status not in {"queued", "scheduled", "stopped"}:
+            status = "scheduled"
+    elif schedule_mode == "start_duration":
+        if not start_value:
+            return redirect(f"/scheduler?{urlencode({'error': 'Start datetime is required.'})}")
+        if not duration_value:
+            return redirect(f"/scheduler?{urlencode({'error': 'Duration minutes must be a positive number.'})}")
+        end_value = None
+        if status not in {"queued", "scheduled", "stopped"}:
+            status = "scheduled"
+
+    if start_value and status == "stopped":
+        status = "scheduled"
+    db.execute(
+        """
+        UPDATE live_jobs
+        SET start_at = ?, end_at = ?, duration_minutes = ?, status = ?,
+            expected_end_at = NULL, stop_reason = NULL, last_error = NULL, updated_at = ?
+        WHERE id = ?
+        """,
+        (dt_to_str(start_value), dt_to_str(end_value), duration_value, status, dt_to_str(local_now()), job_id),
+    )
+    db.commit()
+    return redirect(f"/scheduler?{urlencode({'message': 'Schedule updated.'})}")
 
 @app.get("/history", response_class=HTMLResponse)
 def history_page(

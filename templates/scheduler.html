@@ -1,41 +1,236 @@
 {% extends "admin.html" %}
 {% block title %}Scheduler{% endblock %}
 {% block admin_content %}
-<section class="grid gap-6 lg:grid-cols-3">
-  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-    <h3 class="text-base font-semibold">Manual start</h3>
-    <p class="mt-2 text-sm text-zinc-400">Live bisa dimulai manual dengan tombol Start. Duration is optional.</p>
+<section class="space-y-6">
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+    <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <h3 class="text-base font-semibold">Scheduler</h3>
+        <p class="mt-1 text-sm text-zinc-400">Buat jadwal live dari halaman Live Jobs, lalu jadwalnya akan muncul di sini.</p>
+      </div>
+      <a href="/live-jobs" class="inline-flex rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400">+ Create Scheduled Live</a>
+    </div>
   </div>
-  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-    <h3 class="text-base font-semibold">Start & End datetime</h3>
-    <p class="mt-2 text-sm text-zinc-400">Set start and end time. Duration is calculated automatically and end must be after start.</p>
+
+  <section class="grid gap-4 lg:grid-cols-3">
+    <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+      <h3 class="text-base font-semibold">Manual start</h3>
+      <p class="mt-2 text-sm text-zinc-400">Live bisa dimulai manual dengan tombol Start. Duration is optional.</p>
+    </div>
+    <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+      <h3 class="text-base font-semibold">Start & End datetime</h3>
+      <p class="mt-2 text-sm text-zinc-400">Set start and end time. Duration is calculated automatically and end must be after start.</p>
+    </div>
+    <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+      <h3 class="text-base font-semibold">Start datetime + Duration</h3>
+      <p class="mt-2 text-sm text-zinc-400">Set start time and duration minutes. The dashboard previews the finish time.</p>
+    </div>
+  </section>
+
+  <form method="get" action="/scheduler" class="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+    <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <h3 class="text-base font-semibold">Filters</h3>
+        <p class="mt-1 text-sm text-zinc-400">Filter jadwal berdasarkan channel, status, tanggal, atau nama live.</p>
+      </div>
+      <div class="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-300">
+        Showing <span class="font-semibold text-zinc-100">{{ scheduled_jobs|length }}</span> scheduled jobs
+      </div>
+    </div>
+    <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <label class="block">
+        <span class="text-xs font-medium text-zinc-500">Channel</span>
+        <select name="channel_id" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+          <option value="">All channels</option>
+          {% for channel in channels %}
+            <option value="{{ channel.id }}" {% if job_filters.channel_id == channel.id|string %}selected{% endif %}>{{ channel.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="block">
+        <span class="text-xs font-medium text-zinc-500">Status</span>
+        <select name="status" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+          <option value="">All statuses</option>
+          {% for status in scheduler_statuses %}
+            <option value="{{ status }}" {% if job_filters.status == status %}selected{% endif %}>{{ status }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="block">
+        <span class="text-xs font-medium text-zinc-500">Date from</span>
+        <input name="date_from" value="{{ job_filters.date_from or '' }}" type="date" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+      </label>
+      <label class="block">
+        <span class="text-xs font-medium text-zinc-500">Date to</span>
+        <input name="date_to" value="{{ job_filters.date_to or '' }}" type="date" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+      </label>
+      <label class="block md:col-span-2 xl:col-span-1">
+        <span class="text-xs font-medium text-zinc-500">Search live name</span>
+        <input name="search" value="{{ job_filters.search or '' }}" placeholder="Live name" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+      </label>
+    </div>
+    <div class="mt-4 flex flex-wrap gap-2">
+      <button class="rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400">Apply filters</button>
+      <a href="/scheduler" class="rounded-md border border-zinc-700 px-4 py-2 text-sm font-medium hover:bg-zinc-800">Clear</a>
+    </div>
+  </form>
+
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+    <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+      <div class="flex flex-wrap items-center gap-2">
+        <button type="button" id="select-all-scheduler-jobs" class="rounded-md border border-zinc-700 px-3 py-2 text-xs font-medium hover:bg-zinc-800">Select All</button>
+        <button type="button" id="unselect-all-scheduler-jobs" class="rounded-md border border-zinc-700 px-3 py-2 text-xs font-medium hover:bg-zinc-800">Unselect All</button>
+        <span id="selected-scheduler-job-count" class="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-300">Selected: 0</span>
+      </div>
+      <form id="scheduler-bulk-form" method="post" action="/scheduler/bulk" class="flex flex-wrap gap-2">
+        <div id="scheduler-bulk-inputs"></div>
+        <button name="action" value="start" class="rounded-md bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-500">Start Selected</button>
+        <button name="action" value="stop" class="rounded-md bg-red-700 px-3 py-2 text-xs font-medium text-white hover:bg-red-600">Stop Selected</button>
+        <button name="action" value="cancel" class="rounded-md border border-amber-800 px-3 py-2 text-xs font-medium text-amber-200 hover:bg-amber-950">Cancel Selected Schedule</button>
+      </form>
+    </div>
   </div>
-  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-    <h3 class="text-base font-semibold">Start datetime + Duration</h3>
-    <p class="mt-2 text-sm text-zinc-400">Set start time and duration minutes. The dashboard previews the finish time.</p>
-  </div>
+
+  <section class="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h3 class="text-base font-semibold">Scheduled Jobs Overview</h3>
+        <p class="mt-1 text-sm text-zinc-400">Start, stop, cancel, edit, or inspect scheduled live jobs.</p>
+      </div>
+    </div>
+
+    {% if scheduled_jobs %}
+      <div class="mt-4 overflow-x-auto rounded-lg border border-zinc-800">
+        <table class="min-w-[1500px] table-fixed divide-y divide-zinc-800 text-sm">
+          <thead class="bg-zinc-950 text-left text-xs uppercase tracking-wide text-zinc-500">
+            <tr>
+              <th class="w-14 px-3 py-3">Pick</th>
+              <th class="w-52 px-3 py-3">Live name</th>
+              <th class="w-44 px-3 py-3">Channel</th>
+              <th class="w-60 px-3 py-3">Video</th>
+              <th class="w-44 px-3 py-3">Audio playlist</th>
+              <th class="w-44 px-3 py-3">Schedule mode</th>
+              <th class="w-40 px-3 py-3">Start time</th>
+              <th class="w-40 px-3 py-3">End time</th>
+              <th class="w-32 px-3 py-3">Duration</th>
+              <th class="w-32 px-3 py-3">Status</th>
+              <th class="w-40 px-3 py-3">Countdown</th>
+              <th class="w-64 px-3 py-3 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-zinc-800">
+            {% for job in scheduled_jobs %}
+              <tr class="align-top hover:bg-zinc-950/60">
+                <td class="px-3 py-3">
+                  <input type="checkbox" value="{{ job.id }}" class="scheduler-job-checkbox rounded border-zinc-700 bg-zinc-950 text-emerald-500 focus:ring-emerald-500">
+                </td>
+                <td class="px-3 py-3 font-medium"><div class="break-words">{{ job.live_name }}</div></td>
+                <td class="px-3 py-3 text-zinc-300"><div class="break-words">{{ job.display_channel_name or job.channel_name }}</div></td>
+                <td class="px-3 py-3 text-zinc-400">
+                  <div class="break-words">{{ job.video_original_name }}</div>
+                  {% if not job.video_exists %}
+                    <div class="mt-1 rounded-md border border-red-900 bg-red-950 px-2 py-1 text-xs text-red-200">File video tidak ditemukan.</div>
+                  {% endif %}
+                </td>
+                <td class="px-3 py-3 text-zinc-400">{{ job.audio_playlist_name or "video original" }}</td>
+                <td class="px-3 py-3 text-zinc-300">{{ schedule_mode_label(job) }}</td>
+                <td class="px-3 py-3 text-zinc-400">{{ display_dt(job.start_at) }}</td>
+                <td class="px-3 py-3 text-zinc-400">{{ display_dt(job.end_at) }}</td>
+                <td class="px-3 py-3 text-zinc-300">{{ format_duration_minutes(job.duration_minutes) }}</td>
+                <td class="px-3 py-3"><span class="inline-flex rounded-full border px-2 py-1 text-xs font-medium {{ status_badge_class(job.status) }}">{{ job.status }}</span></td>
+                <td class="px-3 py-3 text-zinc-300">{{ time_until_start(job) }}</td>
+                <td class="px-3 py-3">
+                  <div class="flex flex-wrap justify-end gap-2">
+                    <a href="/live-jobs?search={{ job.live_name|urlencode }}" class="rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs font-medium hover:bg-zinc-800">View Live Job</a>
+                    <details class="relative">
+                      <summary class="list-none rounded-md border border-sky-800 px-2.5 py-1.5 text-xs font-medium text-sky-200 hover:bg-sky-950">Edit Schedule</summary>
+                      <form method="post" action="/scheduler/{{ job.id }}/schedule" class="absolute right-0 z-10 mt-2 w-80 space-y-3 rounded-lg border border-zinc-700 bg-zinc-950 p-4 text-left shadow-xl">
+                        <label class="block">
+                          <span class="text-xs font-medium text-zinc-500">Schedule mode</span>
+                          <select name="schedule_mode" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+                            <option value="manual_now" {% if not job.start_at %}selected{% endif %}>Manual start</option>
+                            <option value="start_end" {% if job.start_at and job.end_at %}selected{% endif %}>Start & End datetime</option>
+                            <option value="start_duration" {% if job.start_at and job.duration_minutes and not job.end_at %}selected{% endif %}>Start datetime + Duration</option>
+                          </select>
+                        </label>
+                        <label class="block">
+                          <span class="text-xs font-medium text-zinc-500">Start datetime</span>
+                          <input name="start_at" value="{{ (job.start_at or '')|replace(' ', 'T') }}" type="datetime-local" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+                        </label>
+                        <label class="block">
+                          <span class="text-xs font-medium text-zinc-500">End datetime</span>
+                          <input name="end_at" value="{{ (job.end_at or '')|replace(' ', 'T') }}" type="datetime-local" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+                        </label>
+                        <label class="block">
+                          <span class="text-xs font-medium text-zinc-500">Duration minutes</span>
+                          <input name="duration_minutes" value="{{ job.duration_minutes or '' }}" type="number" min="1" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+                        </label>
+                        <label class="block">
+                          <span class="text-xs font-medium text-zinc-500">Status</span>
+                          <select name="status" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+                            <option value="stopped" {% if job.status == 'stopped' %}selected{% endif %}>stopped</option>
+                            <option value="queued" {% if job.status == 'queued' %}selected{% endif %}>queued</option>
+                            <option value="scheduled" {% if job.status == 'scheduled' %}selected{% endif %}>scheduled</option>
+                          </select>
+                        </label>
+                        <p class="text-xs text-zinc-500">Stream key tidak diedit dari Scheduler.</p>
+                        <button class="w-full rounded-md bg-emerald-500 px-3 py-2 text-xs font-medium text-zinc-950 hover:bg-emerald-400">Save Schedule</button>
+                      </form>
+                    </details>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="mt-4 rounded-lg border border-dashed border-zinc-700 bg-zinc-950 p-8 text-center">
+        <p class="text-lg font-semibold">Belum ada jadwal live.</p>
+        <p class="mt-2 text-sm text-zinc-400">Buat live job dengan mode Start & End atau Start + Duration.</p>
+        <a href="/live-jobs" class="mt-4 inline-flex rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400">Buat Jadwal Live</a>
+      </div>
+    {% endif %}
+  </section>
 </section>
 
-<section class="mt-6 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-  <h3 class="text-base font-semibold">Scheduled Jobs Overview</h3>
-  <div class="mt-4 overflow-x-auto">
-    <table class="min-w-full divide-y divide-zinc-800 text-sm">
-      <thead class="text-left text-xs uppercase tracking-wide text-zinc-500">
-        <tr><th class="py-2 pr-4">Live</th><th class="py-2 pr-4">Channel</th><th class="py-2 pr-4">Status</th><th class="py-2">Schedule</th></tr>
-      </thead>
-      <tbody class="divide-y divide-zinc-800">
-        {% for job in scheduled_jobs %}
-          <tr>
-            <td class="py-3 pr-4 font-medium">{{ job.live_name }}</td>
-            <td class="py-3 pr-4 text-zinc-400">{{ job.display_channel_name or job.channel_name }}</td>
-            <td class="py-3 pr-4"><span class="rounded-full bg-zinc-800 px-2 py-1 text-xs">{{ job.status }}</span></td>
-            <td class="py-3 text-xs text-zinc-400">{% for line in job_schedule_lines(job) %}<div>{{ line }}</div>{% endfor %}</td>
-          </tr>
-        {% else %}
-          <tr><td colspan="4" class="py-6 text-center text-zinc-500">No scheduled jobs yet.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
+<script>
+  const schedulerCheckboxes = Array.from(document.querySelectorAll(".scheduler-job-checkbox"));
+  const schedulerSelectedCount = document.getElementById("selected-scheduler-job-count");
+  const selectAllSchedulerJobs = document.getElementById("select-all-scheduler-jobs");
+  const unselectAllSchedulerJobs = document.getElementById("unselect-all-scheduler-jobs");
+  const schedulerBulkForm = document.getElementById("scheduler-bulk-form");
+  const schedulerBulkInputs = document.getElementById("scheduler-bulk-inputs");
+  function updateSchedulerSelectedCount() {
+    const selectedCount = schedulerCheckboxes.filter((checkbox) => checkbox.checked).length;
+    if (schedulerSelectedCount) schedulerSelectedCount.textContent = `Selected: ${selectedCount}`;
+  }
+  if (selectAllSchedulerJobs) selectAllSchedulerJobs.addEventListener("click", () => { schedulerCheckboxes.forEach((checkbox) => { checkbox.checked = true; }); updateSchedulerSelectedCount(); });
+  if (unselectAllSchedulerJobs) unselectAllSchedulerJobs.addEventListener("click", () => { schedulerCheckboxes.forEach((checkbox) => { checkbox.checked = false; }); updateSchedulerSelectedCount(); });
+  schedulerCheckboxes.forEach((checkbox) => checkbox.addEventListener("change", updateSchedulerSelectedCount));
+  if (schedulerBulkForm && schedulerBulkInputs) {
+    schedulerBulkForm.addEventListener("submit", (event) => {
+      const selected = schedulerCheckboxes.filter((checkbox) => checkbox.checked);
+      const action = event.submitter ? event.submitter.value : "";
+      if (!selected.length) {
+        event.preventDefault();
+        alert("Select at least one scheduled job first.");
+        return;
+      }
+      if (action === "cancel" && !confirm("Cancel schedule for selected queued/scheduled jobs? Running jobs will be skipped.")) {
+        event.preventDefault();
+        return;
+      }
+      schedulerBulkInputs.innerHTML = "";
+      selected.forEach((checkbox) => {
+        const input = document.createElement("input");
+        input.type = "hidden";
+        input.name = "job_ids";
+        input.value = checkbox.value;
+        schedulerBulkInputs.appendChild(input);
+      });
+    });
+  }
+  updateSchedulerSelectedCount();
+</script>
 {% endblock %}

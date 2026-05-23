@@ -116,7 +116,7 @@ The admin UI is split into tabs with a responsive dark dashboard layout:
 - `Audio Library`: global MP3, WAV, and M4A uploads with duration, size, preview, and delete controls.
 - `Playlists`: per-channel song queues built from the global Audio Library.
 - `Live Jobs`: create live job form, filters, queue controls, bulk actions, Start/Stop/Delete controls, and archive actions for completed jobs.
-- `Scheduler`: scheduling mode explanation and scheduled jobs overview.
+- `Scheduler`: scheduling mode explanation, filters, scheduled jobs table, bulk start/stop/cancel, per-job schedule editing, and links back to Live Jobs.
 - `History`: completed, stopped, failed, deleted, and archived live job records with filters, logs, duplicate-as-new, delete history record, and CSV export.
 - `Logs`: latest FFmpeg log and links to per-job logs.
 - `Settings`: app paths, FFmpeg diagnostics, detailed System Monitor, and health details link.
@@ -215,6 +215,21 @@ Live jobs support three scheduling modes:
 - `Start datetime + Duration`: set a start datetime and duration in minutes. The app previews the automatic finish time.
 
 Existing jobs remain compatible because the app still stores scheduling data in `start_at`, `end_at`, and `duration_minutes`.
+
+## Scheduler Tab
+
+The `Scheduler` tab is the control surface for jobs with scheduling data. Create the job from `Live Jobs`, then manage it from `Scheduler`.
+
+Available Scheduler actions:
+
+- `+ Create Scheduled Live`: opens the Live Jobs page so you can create a job with `Start & End datetime` or `Start datetime + Duration`.
+- `Start Selected`: starts selected jobs that are not already running.
+- `Stop Selected`: stops selected running jobs.
+- `Cancel Selected Schedule`: cancels selected `queued` or `scheduled` jobs, clears their schedule fields, and sets them to `stopped`. Running jobs are skipped.
+- `Edit Schedule`: changes schedule mode, start datetime, end datetime, duration, and scheduler status for one job. Stream keys are not edited from Scheduler.
+- `View Live Job`: opens the Live Jobs page filtered to that live name.
+
+Scheduler filters include channel, status, date from, date to, and live-name search.
 
 ## Live Jobs Control Panel
 
