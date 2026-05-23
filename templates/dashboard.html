@@ -50,39 +50,53 @@
   <section class="mt-6 grid gap-6 lg:grid-cols-3">
     <div class="rounded-lg border border-zinc-200 bg-white p-4">
       <h2 class="text-base font-semibold">Upload MP4</h2>
+      <p class="mt-1 text-sm text-zinc-600">File baru bisa dipakai di Live Job setelah berhasil di-upload.</p>
       <form method="post" action="/videos" enctype="multipart/form-data" class="mt-4 space-y-4">
-        <label class="block">
-          <span class="text-sm font-medium">Video file</span>
-          <input name="file" type="file" accept="video/mp4,.mp4" required class="mt-1 block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-zinc-900 file:px-3 file:py-2 file:text-white">
-        </label>
-        <button class="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700">Upload video</button>
+        <div class="rounded-md border border-zinc-200 bg-zinc-50 p-3">
+          <label class="block">
+            <span class="flex items-center gap-2 text-sm font-semibold">
+              <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-xs text-white">1</span>
+              Step 1: Choose video file
+            </span>
+            <input id="upload-video-file" name="file" type="file" accept="video/mp4,.mp4" required class="mt-3 block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-zinc-900 file:px-3 file:py-2 file:text-white">
+          </label>
+          <p id="upload-pending-warning" class="mt-3 hidden rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">Video sudah dipilih, tapi belum di-upload. Klik Upload Video agar muncul di daftar Live Job.</p>
+        </div>
+        <div class="rounded-md border border-zinc-200 bg-zinc-50 p-3">
+          <p class="mb-3 flex items-center gap-2 text-sm font-semibold">
+            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-xs text-white">2</span>
+            Step 2: Click Upload Video
+          </p>
+          <button class="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700">Upload Video</button>
+        </div>
       </form>
     </div>
 
     <div class="rounded-lg border border-zinc-200 bg-white p-4 lg:col-span-2">
       <h2 class="text-base font-semibold">Create Live Job</h2>
-      <form method="post" action="/jobs" class="mt-4 grid gap-4 sm:grid-cols-2">
+      <form id="create-job-form" method="post" action="/jobs" class="mt-4 grid gap-4 sm:grid-cols-2">
         <label class="block">
           <span class="text-sm font-medium">Live name</span>
-          <input name="live_name" required class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+          <input id="live-name-input" name="live_name" required class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
         </label>
         <label class="block">
           <span class="text-sm font-medium">Channel name</span>
-          <input name="channel_name" required class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+          <input id="channel-name-input" name="channel_name" required class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
         </label>
         <label class="block sm:col-span-2">
           <span class="text-sm font-medium">Video</span>
-          <select name="video_id" required class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+          <select id="video-id-input" name="video_id" required class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
             {% for video in videos %}
               <option value="{{ video.id }}">{{ video.original_name }}</option>
             {% else %}
-              <option value="">Upload a video first</option>
+              <option value="">Belum ada video. Upload video terlebih dahulu.</option>
             {% endfor %}
           </select>
+          <span class="mt-1 block text-xs text-zinc-500">Pilih video yang sudah berhasil di-upload.</span>
         </label>
         <label class="block sm:col-span-2">
           <span class="text-sm font-medium">YouTube stream key</span>
-          <input name="stream_key" type="password" required autocomplete="off" class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+          <input id="stream-key-input" name="stream_key" type="password" required autocomplete="off" class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
         </label>
         <label class="block">
           <span class="text-sm font-medium">Start datetime</span>
@@ -104,7 +118,8 @@
           </select>
         </label>
         <div class="sm:col-span-2">
-          <button {% if not videos %}disabled{% endif %} class="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:bg-zinc-400">Create job</button>
+          <button id="create-job-button" {% if not videos %}disabled{% endif %} class="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:bg-zinc-400">Create job</button>
+          <p id="create-job-helper" class="mt-2 {% if videos %}hidden {% endif %}text-xs text-amber-800">Lengkapi live name, channel, stream key, dan pilih video dulu.</p>
         </div>
       </form>
     </div>
@@ -180,4 +195,43 @@
     </div>
   </section>
 </main>
+<script>
+  const uploadVideoFile = document.getElementById("upload-video-file");
+  const uploadPendingWarning = document.getElementById("upload-pending-warning");
+
+  if (uploadVideoFile && uploadPendingWarning) {
+    uploadVideoFile.addEventListener("change", () => {
+      uploadPendingWarning.classList.toggle("hidden", uploadVideoFile.files.length === 0);
+    });
+  }
+
+  const createJobForm = document.getElementById("create-job-form");
+  const createJobHelper = document.getElementById("create-job-helper");
+  const createJobButton = document.getElementById("create-job-button");
+  const requiredCreateJobFields = [
+    document.getElementById("live-name-input"),
+    document.getElementById("channel-name-input"),
+    document.getElementById("stream-key-input"),
+    document.getElementById("video-id-input"),
+  ].filter(Boolean);
+
+  function updateCreateJobHelper() {
+    if (!createJobHelper) return;
+    const isMissing = requiredCreateJobFields.some((field) => !field.value.trim());
+    const isDisabled = createJobButton && createJobButton.disabled;
+    createJobHelper.classList.toggle("hidden", !isMissing && !isDisabled);
+  }
+
+  requiredCreateJobFields.forEach((field) => {
+    field.addEventListener("input", updateCreateJobHelper);
+    field.addEventListener("change", updateCreateJobHelper);
+    field.addEventListener("invalid", updateCreateJobHelper);
+  });
+
+  if (createJobForm) {
+    createJobForm.addEventListener("submit", updateCreateJobHelper);
+  }
+
+  updateCreateJobHelper();
+</script>
 {% endblock %}

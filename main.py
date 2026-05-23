@@ -544,7 +544,7 @@ def upload_video(
         (filename, original_name, str(target), now),
     )
     db.commit()
-    return redirect("/?message=Video%20uploaded")
+    return redirect("/?message=Video%20berhasil%20di-upload%20dan%20siap%20dipakai.")
 
 
 @app.post("/jobs")
