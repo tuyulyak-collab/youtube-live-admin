@@ -1,0 +1,16 @@
+[Unit]
+Description=YouTube Live Admin FastAPI app
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/youtube-live-admin
+EnvironmentFile=/opt/youtube-live-admin/.env
+ExecStart=/opt/youtube-live-admin/.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
