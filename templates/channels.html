@@ -1,0 +1,47 @@
+{% extends "admin.html" %}
+{% block title %}Channels{% endblock %}
+{% block admin_content %}
+<section class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+  <h3 class="text-base font-semibold">Channels</h3>
+  <p class="mt-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-300">Channel management will be added next.</p>
+</section>
+
+<section class="mt-6 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+  <h3 class="text-base font-semibold">Current Channel Records</h3>
+  <p class="mt-1 text-sm text-zinc-400">These records are used by the Live Jobs channel dropdown.</p>
+  <form method="post" action="/channels" class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+    <input name="name" required placeholder="Name" class="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+    <input name="handle" placeholder="@handle" class="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+    <input name="niche" placeholder="Niche" class="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+    <input name="default_stream_key" type="password" autocomplete="off" placeholder="Default stream key" class="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+    <input name="notes" placeholder="Notes" class="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+    <div class="flex items-center gap-3">
+      <label class="flex items-center gap-2 text-sm"><input name="is_active" type="checkbox" checked>Active</label>
+      <button class="ml-auto rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400">Add</button>
+    </div>
+  </form>
+  <div class="mt-4 space-y-3">
+    {% for channel in channels %}
+      <div class="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+        <form method="post" action="/channels/{{ channel.id }}/update" class="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <input name="name" value="{{ channel.name }}" required class="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm">
+          <input name="handle" value="{{ channel.handle or '' }}" class="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm">
+          <input name="niche" value="{{ channel.niche or '' }}" class="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm">
+          <input name="default_stream_key" value="{{ channel.default_stream_key or '' }}" type="password" autocomplete="off" class="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm">
+          <input name="notes" value="{{ channel.notes or '' }}" class="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm">
+          <div class="flex items-center gap-2">
+            <label class="flex items-center gap-2 text-sm"><input name="is_active" type="checkbox" {% if channel.is_active %}checked{% endif %}>Active</label>
+            <span class="rounded-full px-2 py-1 text-xs {% if channel.is_active %}bg-emerald-950 text-emerald-300{% else %}bg-zinc-800 text-zinc-400{% endif %}">{% if channel.is_active %}active{% else %}inactive{% endif %}</span>
+            <button class="ml-auto rounded-md border border-zinc-700 px-3 py-2 text-xs hover:bg-zinc-800">Save</button>
+          </div>
+        </form>
+        <form method="post" action="/channels/{{ channel.id }}/delete" class="mt-2 flex justify-end">
+          <button class="rounded-md border border-red-900 px-3 py-2 text-xs text-red-300 hover:bg-red-950">{% if channel.live_job_count %}Set inactive{% else %}Delete{% endif %}</button>
+        </form>
+      </div>
+    {% else %}
+      <p class="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-4 text-sm text-zinc-500">No channels yet.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

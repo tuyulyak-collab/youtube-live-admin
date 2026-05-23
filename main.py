@@ -604,8 +604,8 @@ def logout(request: Request):
 def test_ffmpeg(_: None = Depends(require_admin)):
     info = ffmpeg_probe(timeout=10)
     if info["detected"]:
-        return redirect(f"/?{urlencode({'message': 'FFmpeg detected: ' + (info.get('version') or info['path'])})}")
-    return redirect(f"/?{urlencode({'error': 'FFmpeg test failed: ' + (info.get('error') or info['path'])})}")
+        return redirect(f"/settings?{urlencode({'message': 'FFmpeg detected: ' + (info.get('version') or info['path'])})}")
+    return redirect(f"/settings?{urlencode({'error': 'FFmpeg test failed: ' + (info.get('error') or info['path'])})}")
 
 @app.post("/channels")
 def create_channel(
@@ -620,7 +620,7 @@ def create_channel(
 ):
     clean_name = name.strip()
     if not clean_name:
-        return redirect(f"/?{urlencode({'error': 'Channel name is required.'})}")
+        return redirect(f"/channels?{urlencode({'error': 'Channel name is required.'})}")
     now = dt_to_str(local_now())
     db.execute(
         """
@@ -641,7 +641,7 @@ def create_channel(
         ),
     )
     db.commit()
-    return redirect(f"/?{urlencode({'message': 'Channel added.'})}")
+    return redirect(f"/channels?{urlencode({'message': 'Channel added.'})}")
 
 @app.post("/channels/{channel_id}/update")
 def update_channel(
@@ -657,10 +657,10 @@ def update_channel(
 ):
     clean_name = name.strip()
     if not clean_name:
-        return redirect(f"/?{urlencode({'error': 'Channel name is required.'})}")
+        return redirect(f"/channels?{urlencode({'error': 'Channel name is required.'})}")
     channel = db.execute("SELECT id FROM channels WHERE id = ?", (channel_id,)).fetchone()
     if not channel:
-        return redirect(f"/?{urlencode({'error': 'Channel was not found.'})}")
+        return redirect(f"/channels?{urlencode({'error': 'Channel was not found.'})}")
     now = dt_to_str(local_now())
     db.execute(
         """
@@ -681,7 +681,7 @@ def update_channel(
         ),
     )
     db.commit()
-    return redirect(f"/?{urlencode({'message': 'Channel updated.'})}")
+    return redirect(f"/channels?{urlencode({'message': 'Channel updated.'})}")
 
 @app.post("/channels/{channel_id}/delete")
 def delete_channel(
@@ -691,7 +691,7 @@ def delete_channel(
 ):
     channel = db.execute("SELECT id FROM channels WHERE id = ?", (channel_id,)).fetchone()
     if not channel:
-        return redirect(f"/?{urlencode({'error': 'Channel was not found.'})}")
+        return redirect(f"/channels?{urlencode({'error': 'Channel was not found.'})}")
     usage_count = db.execute("SELECT COUNT(*) FROM live_jobs WHERE channel_id = ?", (channel_id,)).fetchone()[0]
     if usage_count:
         db.execute(
@@ -699,19 +699,32 @@ def delete_channel(
             (dt_to_str(local_now()), channel_id),
         )
         db.commit()
-        return redirect(f"/?{urlencode({'message': 'Channel is used by live jobs, so it was set inactive.'})}")
+        return redirect(f"/channels?{urlencode({'message': 'Channel is used by live jobs, so it was set inactive.'})}")
     db.execute("DELETE FROM channels WHERE id = ?", (channel_id,))
     db.commit()
-    return redirect(f"/?{urlencode({'message': 'Channel deleted.'})}")
+    return redirect(f"/channels?{urlencode({'message': 'Channel deleted.'})}")
 
-@app.get("/", response_class=HTMLResponse)
-def dashboard(
+NAV_ITEMS = [
+    {"key": "dashboard", "label": "Dashboard", "href": "/dashboard"},
+    {"key": "channels", "label": "Channels", "href": "/channels"},
+    {"key": "videos", "label": "Video Library", "href": "/videos"},
+    {"key": "audio", "label": "Audio Library", "href": "/audio"},
+    {"key": "playlists", "label": "Playlists", "href": "/playlists"},
+    {"key": "live_jobs", "label": "Live Jobs", "href": "/live-jobs"},
+    {"key": "scheduler", "label": "Scheduler", "href": "/scheduler"},
+    {"key": "history", "label": "History", "href": "/history"},
+    {"key": "logs", "label": "Logs", "href": "/logs"},
+    {"key": "settings", "label": "Settings", "href": "/settings"},
+]
+
+def admin_context(
     request: Request,
-    db: sqlite3.Connection = Depends(get_db),
-    _: None = Depends(require_admin),
+    db: sqlite3.Connection,
+    active_tab: str,
+    page_title: str,
     message: str | None = None,
     error: str | None = None,
-):
+) -> dict[str, Any]:
     videos = [dict(row) for row in db.execute("SELECT * FROM videos ORDER BY uploaded_at DESC").fetchall()]
     jobs = [
         dict(row)
@@ -765,27 +778,161 @@ def dashboard(
     for job in jobs:
         if not Path(job["video_path"]).exists():
             warnings.append(f"Video file missing for job '{job['live_name']}': {job['video_filename']}")
+    scheduled_jobs = [
+        job for job in jobs if job.get("status") == "scheduled" or job.get("start_at") or job.get("end_at")
+    ]
+    completed_jobs = [job for job in jobs if job.get("status") in {"stopped", "error"}]
+    return {
+        "request": request,
+        "nav_items": NAV_ITEMS,
+        "active_tab": active_tab,
+        "page_title": page_title,
+        "videos": videos,
+        "jobs": jobs,
+        "scheduled_jobs": scheduled_jobs,
+        "completed_jobs": completed_jobs,
+        "channels": channels,
+        "active_channels": active_channels,
+        "totals": totals,
+        "warnings": warnings,
+        "message": message,
+        "error": error,
+        "ffmpeg_info": ffmpeg_info,
+        "latest_log": latest_any_log(db),
+        "display_dt": display_dt,
+        "display_dt_local": display_dt_local,
+        "format_duration_minutes": format_duration_minutes,
+        "job_schedule_lines": job_schedule_lines,
+        "mask_secret": mask_secret,
+        "admin_username": ADMIN_USERNAME,
+        "database_path": str(DB_PATH),
+        "video_dir": str(VIDEO_DIR),
+        "log_dir": str(LOG_DIR),
+    }
+
+def render_admin(
+    template_name: str,
+    request: Request,
+    db: sqlite3.Connection,
+    active_tab: str,
+    page_title: str,
+    message: str | None = None,
+    error: str | None = None,
+) -> HTMLResponse:
     return templates.TemplateResponse(
-        "dashboard.html",
-        {
-            "request": request,
-            "videos": videos,
-            "jobs": jobs,
-            "channels": channels,
-            "active_channels": active_channels,
-            "totals": totals,
-            "warnings": warnings,
-            "message": message,
-            "error": error,
-            "ffmpeg_info": ffmpeg_info,
-            "latest_log": latest_any_log(db),
-            "display_dt": display_dt,
-            "display_dt_local": display_dt_local,
-            "format_duration_minutes": format_duration_minutes,
-            "job_schedule_lines": job_schedule_lines,
-            "mask_secret": mask_secret,
-        },
+        template_name,
+        admin_context(request, db, active_tab, page_title, message, error),
     )
+
+@app.get("/", response_class=HTMLResponse)
+def root(
+    request: Request,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+    message: str | None = None,
+    error: str | None = None,
+):
+    return render_admin("dashboard.html", request, db, "dashboard", "Dashboard", message, error)
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard_page(
+    request: Request,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+    message: str | None = None,
+    error: str | None = None,
+):
+    return render_admin("dashboard.html", request, db, "dashboard", "Dashboard", message, error)
+
+@app.get("/channels", response_class=HTMLResponse)
+def channels_page(
+    request: Request,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+    message: str | None = None,
+    error: str | None = None,
+):
+    return render_admin("channels.html", request, db, "channels", "Channels", message, error)
+
+@app.get("/videos", response_class=HTMLResponse)
+def videos_page(
+    request: Request,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+    message: str | None = None,
+    error: str | None = None,
+):
+    return render_admin("videos.html", request, db, "videos", "Video Library", message, error)
+
+@app.get("/audio", response_class=HTMLResponse)
+def audio_page(
+    request: Request,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+    message: str | None = None,
+    error: str | None = None,
+):
+    return render_admin("placeholder.html", request, db, "audio", "Audio Library", message, error)
+
+@app.get("/playlists", response_class=HTMLResponse)
+def playlists_page(
+    request: Request,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+    message: str | None = None,
+    error: str | None = None,
+):
+    return render_admin("placeholder.html", request, db, "playlists", "Playlists", message, error)
+
+@app.get("/live-jobs", response_class=HTMLResponse)
+def live_jobs_page(
+    request: Request,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+    message: str | None = None,
+    error: str | None = None,
+):
+    return render_admin("live_jobs.html", request, db, "live_jobs", "Live Jobs", message, error)
+
+@app.get("/scheduler", response_class=HTMLResponse)
+def scheduler_page(
+    request: Request,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+    message: str | None = None,
+    error: str | None = None,
+):
+    return render_admin("scheduler.html", request, db, "scheduler", "Scheduler", message, error)
+
+@app.get("/history", response_class=HTMLResponse)
+def history_page(
+    request: Request,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+    message: str | None = None,
+    error: str | None = None,
+):
+    return render_admin("placeholder.html", request, db, "history", "History", message, error)
+
+@app.get("/logs", response_class=HTMLResponse)
+def logs_page(
+    request: Request,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+    message: str | None = None,
+    error: str | None = None,
+):
+    return render_admin("logs_admin.html", request, db, "logs", "Logs", message, error)
+
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page(
+    request: Request,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+    message: str | None = None,
+    error: str | None = None,
+):
+    return render_admin("settings.html", request, db, "settings", "Settings", message, error)
 
 
 @app.post("/videos")
@@ -797,7 +944,7 @@ def upload_video(
 ):
     original_name = file.filename or ""
     if not original_name.lower().endswith(".mp4"):
-        return redirect("/?error=Only%20MP4%20uploads%20are%20allowed")
+        return redirect("/videos?error=Only%20MP4%20uploads%20are%20allowed")
     filename = f"{local_now().strftime('%Y%m%d%H%M%S')}_{safe_filename(original_name)}"
     target = VIDEO_DIR / filename
     with target.open("wb") as output:
@@ -808,7 +955,7 @@ def upload_video(
         (filename, original_name, str(target), now),
     )
     db.commit()
-    return redirect("/?message=Video%20berhasil%20di-upload%20dan%20siap%20dipakai.")
+    return redirect("/videos?message=Video%20berhasil%20di-upload%20dan%20siap%20dipakai.")
 
 
 @app.post("/jobs")
@@ -828,28 +975,28 @@ def create_job(
 ):
     clean_live_name = live_name.strip()
     if channel_id is None:
-        return redirect(f"/?{urlencode({'error': 'Select an active channel first.'})}")
+        return redirect(f"/live-jobs?{urlencode({'error': 'Select an active channel first.'})}")
     channel = db.execute("SELECT * FROM channels WHERE id = ? AND is_active = 1", (channel_id,)).fetchone()
     if not channel:
-        return redirect(f"/?{urlencode({'error': 'Select an active channel first.'})}")
+        return redirect(f"/live-jobs?{urlencode({'error': 'Select an active channel first.'})}")
     clean_channel_name = channel["name"]
     clean_stream_key = stream_key.strip() or (channel["default_stream_key"] or "").strip()
     if not clean_live_name or not clean_channel_name or not clean_stream_key:
-        return redirect("/?error=Live%20name,%20channel,%20and%20stream%20key%20are%20required")
+        return redirect("/live-jobs?error=Live%20name,%20channel,%20and%20stream%20key%20are%20required")
     if status not in STATUSES - {"running"}:
         status = "stopped"
     video = db.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
     if not video:
-        return redirect("/?error=Selected%20video%20was%20not%20found")
+        return redirect("/live-jobs?error=Selected%20video%20was%20not%20found")
     if not Path(video["path"]).exists():
-        return redirect("/?error=Selected%20video%20file%20does%20not%20exist")
+        return redirect("/live-jobs?error=Selected%20video%20file%20does%20not%20exist")
     if schedule_mode not in {"manual_now", "start_end", "start_duration"}:
         schedule_mode = "manual_now"
     try:
         start_value = parse_dt(start_at) if start_at else None
         end_value = parse_dt(end_at) if end_at else None
     except ValueError:
-        return redirect("/?error=Invalid%20date%20or%20time")
+        return redirect("/live-jobs?error=Invalid%20date%20or%20time")
 
     duration_value = None
     if duration_minutes:
@@ -858,26 +1005,26 @@ def create_job(
             if duration_value <= 0:
                 raise ValueError
         except ValueError:
-            return redirect("/?error=Duration%20must%20be%20a%20positive%20number")
+            return redirect("/live-jobs?error=Duration%20must%20be%20a%20positive%20number")
 
     if schedule_mode == "manual_now":
         start_value = None
         end_value = None
     elif schedule_mode == "start_end":
         if not start_value or not end_value:
-            return redirect(f"/?{urlencode({'error': 'Start datetime dan end datetime wajib diisi.'})}")
+            return redirect(f"/live-jobs?{urlencode({'error': 'Start datetime dan end datetime wajib diisi.'})}")
         if end_value <= start_value:
-            return redirect(f"/?{urlencode({'error': 'End datetime harus setelah start datetime.'})}")
+            return redirect(f"/live-jobs?{urlencode({'error': 'End datetime harus setelah start datetime.'})}")
         duration_value = duration_between_minutes(start_value, end_value)
     elif schedule_mode == "start_duration":
         if not start_value:
-            return redirect(f"/?{urlencode({'error': 'Start datetime wajib diisi.'})}")
+            return redirect(f"/live-jobs?{urlencode({'error': 'Start datetime wajib diisi.'})}")
         if not duration_value or duration_value <= 0:
-            return redirect(f"/?{urlencode({'error': 'Duration minutes harus lebih dari 0.'})}")
+            return redirect(f"/live-jobs?{urlencode({'error': 'Duration minutes harus lebih dari 0.'})}")
         end_value = None
 
     if start_value and end_value and end_value <= start_value:
-        return redirect(f"/?{urlencode({'error': 'End datetime harus setelah start datetime.'})}")
+        return redirect(f"/live-jobs?{urlencode({'error': 'End datetime harus setelah start datetime.'})}")
     if start_value and end_value:
         duration_value = duration_between_minutes(start_value, end_value)
     if start_value and status == "stopped":
@@ -907,21 +1054,21 @@ def create_job(
         ),
     )
     db.commit()
-    return redirect("/?message=Live%20job%20created")
+    return redirect("/live-jobs?message=Live%20job%20created")
 
 
 @app.post("/jobs/{job_id}/start")
 def start_live(job_id: int, db: sqlite3.Connection = Depends(get_db), _: None = Depends(require_admin)):
     ok, message = start_job(db, job_id)
     key = "message" if ok else "error"
-    return redirect(f"/?{urlencode({key: message})}")
+    return redirect(f"/live-jobs?{urlencode({key: message})}")
 
 
 @app.post("/jobs/{job_id}/stop")
 def stop_live(job_id: int, db: sqlite3.Connection = Depends(get_db), _: None = Depends(require_admin)):
     ok, message = stop_job(db, job_id)
     key = "message" if ok else "error"
-    return redirect(f"/?{urlencode({key: message})}")
+    return redirect(f"/live-jobs?{urlencode({key: message})}")
 
 
 @app.get("/jobs/{job_id}/logs", response_class=HTMLResponse)
@@ -933,7 +1080,7 @@ def job_logs(
 ):
     job = get_job(db, job_id)
     if not job:
-        return redirect("/?error=Live%20job%20was%20not%20found")
+        return redirect("/logs?error=Live%20job%20was%20not%20found")
     return templates.TemplateResponse(
         "logs.html",
         {

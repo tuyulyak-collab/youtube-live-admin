@@ -1,0 +1,52 @@
+{% extends "admin.html" %}
+{% block title %}Video Library{% endblock %}
+{% block admin_content %}
+<section class="grid gap-6 lg:grid-cols-3">
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <h3 class="text-base font-semibold">Upload MP4</h3>
+    <p class="mt-1 text-sm text-zinc-400">File baru bisa dipakai di Live Job setelah berhasil di-upload.</p>
+    <form method="post" action="/videos" enctype="multipart/form-data" class="mt-4 space-y-4">
+      <label class="block">
+        <span class="flex items-center gap-2 text-sm font-semibold"><span class="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-xs text-zinc-950">1</span>Langkah 1: Pilih file video</span>
+        <input id="upload-video-file" name="file" type="file" accept="video/mp4,.mp4" required class="mt-3 block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-emerald-500 file:px-3 file:py-2 file:text-zinc-950">
+      </label>
+      <p id="upload-pending-warning" class="hidden rounded-md border border-amber-800 bg-amber-950 px-3 py-2 text-xs text-amber-200">Video sudah dipilih, tapi belum di-upload. Klik Upload Video agar muncul di daftar Live Job.</p>
+      <div>
+        <p class="mb-2 flex items-center gap-2 text-sm font-semibold"><span class="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-xs text-zinc-950">2</span>Langkah 2: Upload video</p>
+        <button class="w-full rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400">Upload Video</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4 lg:col-span-2">
+    <h3 class="text-base font-semibold">Uploaded Videos</h3>
+    <div class="mt-4 overflow-x-auto">
+      <table class="min-w-full divide-y divide-zinc-800 text-sm">
+        <thead class="text-left text-xs uppercase tracking-wide text-zinc-500">
+          <tr><th class="py-2 pr-4">File</th><th class="py-2 pr-4">Uploaded</th><th class="py-2">Stored name</th></tr>
+        </thead>
+        <tbody class="divide-y divide-zinc-800">
+          {% for video in videos %}
+            <tr>
+              <td class="py-3 pr-4 font-medium">{{ video.original_name }}</td>
+              <td class="py-3 pr-4 text-zinc-400">{{ display_dt(video.uploaded_at) }}</td>
+              <td class="py-3 text-zinc-500">{{ video.filename }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="3" class="py-6 text-center text-zinc-500">No uploaded videos yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+<script>
+  const uploadVideoFile = document.getElementById("upload-video-file");
+  const uploadPendingWarning = document.getElementById("upload-pending-warning");
+  if (uploadVideoFile && uploadPendingWarning) {
+    uploadVideoFile.addEventListener("change", () => {
+      uploadPendingWarning.classList.toggle("hidden", uploadVideoFile.files.length === 0);
+    });
+  }
+</script>
+{% endblock %}

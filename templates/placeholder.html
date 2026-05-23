@@ -1,0 +1,24 @@
+{% extends "admin.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+{% block admin_content %}
+<section class="rounded-lg border border-zinc-800 bg-zinc-900 p-6">
+  <h3 class="text-base font-semibold">{{ page_title }}</h3>
+  {% if active_tab == "audio" %}
+    <p class="mt-2 text-sm text-zinc-400">Audio upload and music library will be added next.</p>
+  {% elif active_tab == "playlists" %}
+    <p class="mt-2 text-sm text-zinc-400">Per-channel audio playlists will be added next.</p>
+  {% elif active_tab == "history" %}
+    <p class="mt-2 text-sm text-zinc-400">Completed and failed live history will be added next.</p>
+    <div class="mt-4 grid gap-3 md:grid-cols-2">
+      {% for job in completed_jobs[:6] %}
+        <div class="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-sm">
+          <p class="font-medium">{{ job.live_name }}</p>
+          <p class="text-zinc-500">{{ job.status }} · {{ job.display_channel_name or job.channel_name }}</p>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="mt-2 text-sm text-zinc-400">This section will be added next.</p>
+  {% endif %}
+</section>
+{% endblock %}

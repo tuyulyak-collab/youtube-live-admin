@@ -1,0 +1,27 @@
+{% extends "admin.html" %}
+{% block title %}Logs{% endblock %}
+{% block admin_content %}
+<section class="grid gap-6 lg:grid-cols-3">
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4 lg:col-span-2">
+    <h3 class="text-base font-semibold">Latest FFmpeg Log</h3>
+    {% if latest_log %}
+      <p class="mt-3 text-sm font-medium">{{ latest_log.job.live_name }}</p>
+      <pre class="mt-2 max-h-96 overflow-auto rounded-md bg-black p-4 text-xs leading-relaxed text-zinc-200">{{ latest_log.text }}</pre>
+    {% else %}
+      <p class="mt-3 text-sm text-zinc-500">No FFmpeg logs yet.</p>
+    {% endif %}
+  </div>
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <h3 class="text-base font-semibold">Job Log Links</h3>
+    <div class="mt-4 space-y-2">
+      {% for job in jobs %}
+        <a href="/jobs/{{ job.id }}/logs" class="block rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm hover:bg-zinc-800">
+          {{ job.live_name }} <span class="text-zinc-500">({{ job.status }})</span>
+        </a>
+      {% else %}
+        <p class="text-sm text-zinc-500">No jobs yet.</p>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+{% endblock %}

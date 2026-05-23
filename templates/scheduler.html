@@ -1,0 +1,41 @@
+{% extends "admin.html" %}
+{% block title %}Scheduler{% endblock %}
+{% block admin_content %}
+<section class="grid gap-6 lg:grid-cols-3">
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <h3 class="text-base font-semibold">Manual start</h3>
+    <p class="mt-2 text-sm text-zinc-400">Live bisa dimulai manual dengan tombol Start. Duration is optional.</p>
+  </div>
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <h3 class="text-base font-semibold">Start & End datetime</h3>
+    <p class="mt-2 text-sm text-zinc-400">Set start and end time. Duration is calculated automatically and end must be after start.</p>
+  </div>
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <h3 class="text-base font-semibold">Start datetime + Duration</h3>
+    <p class="mt-2 text-sm text-zinc-400">Set start time and duration minutes. The dashboard previews the finish time.</p>
+  </div>
+</section>
+
+<section class="mt-6 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+  <h3 class="text-base font-semibold">Scheduled Jobs Overview</h3>
+  <div class="mt-4 overflow-x-auto">
+    <table class="min-w-full divide-y divide-zinc-800 text-sm">
+      <thead class="text-left text-xs uppercase tracking-wide text-zinc-500">
+        <tr><th class="py-2 pr-4">Live</th><th class="py-2 pr-4">Channel</th><th class="py-2 pr-4">Status</th><th class="py-2">Schedule</th></tr>
+      </thead>
+      <tbody class="divide-y divide-zinc-800">
+        {% for job in scheduled_jobs %}
+          <tr>
+            <td class="py-3 pr-4 font-medium">{{ job.live_name }}</td>
+            <td class="py-3 pr-4 text-zinc-400">{{ job.display_channel_name or job.channel_name }}</td>
+            <td class="py-3 pr-4"><span class="rounded-full bg-zinc-800 px-2 py-1 text-xs">{{ job.status }}</span></td>
+            <td class="py-3 text-xs text-zinc-400">{% for line in job_schedule_lines(job) %}<div>{{ line }}</div>{% endfor %}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4" class="py-6 text-center text-zinc-500">No scheduled jobs yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

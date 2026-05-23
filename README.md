@@ -106,9 +106,24 @@ admin / admin123
 
 Uploaded videos are saved to `uploads/videos`. FFmpeg logs are saved to `uploads/logs`. SQLite data is saved to `data/app.db`.
 
+## Admin Layout
+
+The admin UI is split into tabs with a responsive dark dashboard layout:
+
+- `Dashboard`: summary stats, FFmpeg status, quick live job overview, and latest log preview.
+- `Channels`: channel records used by Live Jobs. A placeholder note is shown while the full channel workflow continues to evolve.
+- `Video Library`: MP4 upload and uploaded video list.
+- `Audio Library`: placeholder for future audio upload and music library features.
+- `Playlists`: placeholder for future per-channel audio playlists.
+- `Live Jobs`: create live job form, live job table, and Start/Stop controls.
+- `Scheduler`: scheduling mode explanation and scheduled jobs overview.
+- `History`: placeholder for completed and failed live history, with a small current-job preview where available.
+- `Logs`: latest FFmpeg log and links to per-job logs.
+- `Settings`: app paths and FFmpeg diagnostics.
+
 ## Channel Management
 
-Add channels from the `Channel Management` section on the dashboard before creating a Live Job. The Create Live Job form only shows active channels.
+Add channels from the `Channels` tab before creating a Live Job. The Create Live Job form only shows active channels.
 
 Each channel can store:
 

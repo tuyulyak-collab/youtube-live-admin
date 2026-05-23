@@ -1,0 +1,30 @@
+{% extends "admin.html" %}
+{% block title %}Settings{% endblock %}
+{% block admin_content %}
+<section class="grid gap-6 lg:grid-cols-2">
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <h3 class="text-base font-semibold">App Configuration</h3>
+    <dl class="mt-4 space-y-3 text-sm">
+      <div><dt class="text-zinc-500">Admin username</dt><dd>{{ admin_username }}</dd></div>
+      <div><dt class="text-zinc-500">Database</dt><dd class="break-all">{{ database_path }}</dd></div>
+      <div><dt class="text-zinc-500">Video directory</dt><dd class="break-all">{{ video_dir }}</dd></div>
+      <div><dt class="text-zinc-500">Log directory</dt><dd class="break-all">{{ log_dir }}</dd></div>
+    </dl>
+  </div>
+
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <h3 class="text-base font-semibold">FFmpeg Diagnostics</h3>
+    <dl class="mt-4 space-y-3 text-sm">
+      <div><dt class="text-zinc-500">Status</dt><dd class="{% if ffmpeg_info.detected %}text-emerald-400{% else %}text-red-400{% endif %}">{% if ffmpeg_info.detected %}detected{% else %}not detected{% endif %}</dd></div>
+      <div><dt class="text-zinc-500">Path used</dt><dd class="break-all">{{ ffmpeg_info.path }}</dd></div>
+      <div><dt class="text-zinc-500">Version</dt><dd class="break-words">{{ ffmpeg_info.version or "-" }}</dd></div>
+    </dl>
+    {% if ffmpeg_info.error %}
+      <p class="mt-4 rounded-md border border-amber-900 bg-amber-950 px-3 py-2 text-xs text-amber-200">{{ ffmpeg_info.error }}</p>
+    {% endif %}
+    <form method="post" action="/ffmpeg/test" class="mt-4">
+      <button class="rounded-md border border-zinc-700 px-4 py-2 text-sm font-medium hover:bg-zinc-800">Test FFmpeg</button>
+    </form>
+  </div>
+</section>
+{% endblock %}
