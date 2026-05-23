@@ -79,6 +79,94 @@
     </div>
   </section>
 
+  <section class="mt-6 rounded-lg border border-zinc-200 bg-white p-4">
+    <div class="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <h2 class="text-base font-semibold">Channel Management</h2>
+        <p class="text-sm text-zinc-600">Kelola channel yang bisa dipilih saat membuat Live Job.</p>
+      </div>
+      <p class="text-xs text-zinc-500">{{ channels|length }} channel</p>
+    </div>
+
+    <form method="post" action="/channels" class="mt-4 grid gap-3 border-t border-zinc-200 pt-4 md:grid-cols-2 xl:grid-cols-6">
+      <label class="block">
+        <span class="text-xs font-medium text-zinc-600">Name</span>
+        <input name="name" required class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+      </label>
+      <label class="block">
+        <span class="text-xs font-medium text-zinc-600">Handle</span>
+        <input name="handle" placeholder="@channel" class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+      </label>
+      <label class="block">
+        <span class="text-xs font-medium text-zinc-600">Niche</span>
+        <input name="niche" class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+      </label>
+      <label class="block">
+        <span class="text-xs font-medium text-zinc-600">Default stream key</span>
+        <input name="default_stream_key" type="password" autocomplete="off" class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+      </label>
+      <label class="block md:col-span-2 xl:col-span-1">
+        <span class="text-xs font-medium text-zinc-600">Notes</span>
+        <input name="notes" class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+      </label>
+      <div class="flex items-end gap-3">
+        <label class="mb-2 flex items-center gap-2 text-sm text-zinc-700">
+          <input name="is_active" type="checkbox" checked>
+          Active
+        </label>
+        <button class="ml-auto rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700">Add channel</button>
+      </div>
+    </form>
+
+    <div class="mt-4 space-y-3">
+      {% for channel in channels %}
+        <div class="rounded-md border border-zinc-200 bg-zinc-50 p-3">
+          <form id="channel-update-{{ channel.id }}" method="post" action="/channels/{{ channel.id }}/update" class="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+            <label class="block">
+              <span class="text-xs font-medium text-zinc-600">Name</span>
+              <input name="name" value="{{ channel.name }}" required class="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-800">
+            </label>
+            <label class="block">
+              <span class="text-xs font-medium text-zinc-600">Handle</span>
+              <input name="handle" value="{{ channel.handle or '' }}" class="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-800">
+            </label>
+            <label class="block">
+              <span class="text-xs font-medium text-zinc-600">Niche</span>
+              <input name="niche" value="{{ channel.niche or '' }}" class="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-800">
+            </label>
+            <label class="block">
+              <span class="text-xs font-medium text-zinc-600">Default stream key</span>
+              <input name="default_stream_key" value="{{ channel.default_stream_key or '' }}" type="password" autocomplete="off" class="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-800">
+              <span class="mt-1 block text-xs text-zinc-500">Saved: {{ mask_secret(channel.default_stream_key) or '-' }}</span>
+            </label>
+            <label class="block md:col-span-2 xl:col-span-1">
+              <span class="text-xs font-medium text-zinc-600">Notes</span>
+              <input name="notes" value="{{ channel.notes or '' }}" class="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-800">
+            </label>
+            <div class="flex flex-wrap items-end gap-2">
+              <label class="mb-2 flex items-center gap-2 text-sm text-zinc-700">
+                <input name="is_active" type="checkbox" {% if channel.is_active %}checked{% endif %}>
+                Active
+              </label>
+              <span class="mb-2 rounded-full px-2 py-1 text-xs font-medium {% if channel.is_active %}bg-emerald-100 text-emerald-800{% else %}bg-zinc-200 text-zinc-700{% endif %}">
+                {% if channel.is_active %}active{% else %}inactive{% endif %}
+              </span>
+              <span class="mb-2 text-xs text-zinc-500">{{ channel.live_job_count }} jobs</span>
+              <button class="ml-auto rounded-md border border-zinc-300 bg-white px-3 py-2 text-xs font-medium hover:bg-zinc-50">Save</button>
+            </div>
+          </form>
+          <form method="post" action="/channels/{{ channel.id }}/delete" class="mt-2 flex justify-end">
+            <button class="rounded-md border border-red-200 bg-white px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50">
+              {% if channel.live_job_count %}Set inactive{% else %}Delete{% endif %}
+            </button>
+          </form>
+        </div>
+      {% else %}
+        <p class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">Belum ada channel. Tambahkan channel sebelum membuat Live Job.</p>
+      {% endfor %}
+    </div>
+  </section>
+
   <section class="mt-6 grid gap-6 lg:grid-cols-3">
     <div class="rounded-lg border border-zinc-200 bg-white p-4">
       <h2 class="text-base font-semibold">Upload MP4</h2>
@@ -124,8 +212,15 @@
               <input id="live-name-input" name="live_name" required class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
             </label>
             <label class="block">
-              <span class="text-sm font-medium">Channel name</span>
-              <input id="channel-name-input" name="channel_name" required class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+              <span class="text-sm font-medium">Channel</span>
+              <select id="channel-id-input" name="channel_id" required class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+                {% for channel in active_channels %}
+                  <option value="{{ channel.id }}" data-stream-key="{{ channel.default_stream_key or '' }}">{{ channel.name }}{% if channel.handle %} ({{ channel.handle }}){% endif %}</option>
+                {% else %}
+                  <option value="">Belum ada channel aktif. Tambahkan channel terlebih dahulu.</option>
+                {% endfor %}
+              </select>
+              <span class="mt-1 block text-xs text-zinc-500">Hanya channel active yang muncul di daftar ini.</span>
             </label>
             <label class="block sm:col-span-2">
               <span class="text-sm font-medium">Video</span>
@@ -227,7 +322,12 @@
           {% for job in jobs %}
             <tr>
               <td class="px-4 py-3 font-medium">{{ job.live_name }}<div class="text-xs font-normal text-zinc-500">Key {{ mask_secret(job.stream_key) }}</div></td>
-              <td class="px-4 py-3">{{ job.channel_name }}</td>
+              <td class="px-4 py-3">
+                {{ job.display_channel_name or job.channel_name }}
+                {% if job.channel_id and not job.channel_is_active %}
+                  <div class="mt-1 text-xs text-zinc-500">inactive channel</div>
+                {% endif %}
+              </td>
               <td class="px-4 py-3 max-w-xs truncate">{{ job.video_original_name }}</td>
               <td class="px-4 py-3">
                 <span class="rounded-full px-2 py-1 text-xs font-medium
@@ -289,6 +389,9 @@
   const createJobForm = document.getElementById("create-job-form");
   const createJobHelper = document.getElementById("create-job-helper");
   const createJobButton = document.getElementById("create-job-button");
+  const channelIdInput = document.getElementById("channel-id-input");
+  const streamKeyInput = document.getElementById("stream-key-input");
+  let lastAutoFilledStreamKey = "";
   const scheduleModeInputs = Array.from(document.querySelectorAll("input[name='schedule_mode']"));
   const scheduleModeHelper = document.getElementById("schedule-mode-helper");
   const scheduleStartField = document.getElementById("schedule-start-field");
@@ -301,10 +404,23 @@
   const scheduleValidationHelper = document.getElementById("schedule-validation-helper");
   const requiredCreateJobFields = [
     document.getElementById("live-name-input"),
-    document.getElementById("channel-name-input"),
-    document.getElementById("stream-key-input"),
+    channelIdInput,
+    streamKeyInput,
     document.getElementById("video-id-input"),
   ].filter(Boolean);
+
+  function fillDefaultStreamKey(force = false) {
+    if (!channelIdInput || !streamKeyInput) return;
+    const selected = channelIdInput.options[channelIdInput.selectedIndex];
+    const defaultStreamKey = selected ? selected.dataset.streamKey || "" : "";
+    if (defaultStreamKey && (force || !streamKeyInput.value.trim())) {
+      streamKeyInput.value = defaultStreamKey;
+      lastAutoFilledStreamKey = defaultStreamKey;
+    } else if (!defaultStreamKey && streamKeyInput.value === lastAutoFilledStreamKey) {
+      streamKeyInput.value = "";
+      lastAutoFilledStreamKey = "";
+    }
+  }
 
   function selectedScheduleMode() {
     const selected = scheduleModeInputs.find((field) => field.checked);
@@ -453,6 +569,13 @@
     field.addEventListener("invalid", updateCreateJobHelper);
   });
 
+  if (channelIdInput) {
+    channelIdInput.addEventListener("change", () => {
+      fillDefaultStreamKey(true);
+      updateCreateJobHelper();
+    });
+  }
+
   if (createJobForm) {
     createJobForm.addEventListener("submit", updateCreateJobHelper);
   }
@@ -466,6 +589,7 @@
     field.addEventListener("change", updateCreateJobHelper);
   });
 
+  fillDefaultStreamKey(false);
   updateCreateJobHelper();
 </script>
 {% endblock %}

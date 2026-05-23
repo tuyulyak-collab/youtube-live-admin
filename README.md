@@ -106,6 +106,23 @@ admin / admin123
 
 Uploaded videos are saved to `uploads/videos`. FFmpeg logs are saved to `uploads/logs`. SQLite data is saved to `data/app.db`.
 
+## Channel Management
+
+Add channels from the `Channel Management` section on the dashboard before creating a Live Job. The Create Live Job form only shows active channels.
+
+Each channel can store:
+
+- name
+- optional handle
+- optional niche
+- optional notes
+- optional default stream key
+- active or inactive status
+
+If a channel has a default stream key, selecting that channel auto-fills the stream key field in the Live Job form. You can still edit the stream key before creating the job. Stream keys are masked in the visible channel list where possible.
+
+Inactive channels stay in the database but are hidden from the Create Live Job dropdown. If a channel is already used by live jobs, deleting it will set it inactive instead of removing it, so existing jobs keep working and can still display their channel name.
+
 ## Scheduling Modes
 
 Live jobs support three scheduling modes:

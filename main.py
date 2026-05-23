@@ -153,6 +153,18 @@ def init_db() -> None:
     with connect_db() as conn:
         conn.executescript(
             """
+            CREATE TABLE IF NOT EXISTS channels (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                handle TEXT,
+                niche TEXT,
+                notes TEXT,
+                default_stream_key TEXT,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS videos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 filename TEXT NOT NULL,
@@ -165,6 +177,7 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 live_name TEXT NOT NULL,
                 channel_name TEXT NOT NULL,
+                channel_id INTEGER,
                 video_id INTEGER NOT NULL,
                 stream_key TEXT NOT NULL,
                 start_at TEXT,
@@ -177,10 +190,16 @@ def init_db() -> None:
                 started_at TEXT,
                 stopped_at TEXT,
                 last_error TEXT,
+                FOREIGN KEY(channel_id) REFERENCES channels(id),
                 FOREIGN KEY(video_id) REFERENCES videos(id)
             );
             """
         )
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(live_jobs)").fetchall()}
+        if "channel_id" not in columns:
+            conn.execute("ALTER TABLE live_jobs ADD COLUMN channel_id INTEGER")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_live_jobs_channel_id ON live_jobs(channel_id)")
+        conn.commit()
 
 
 def get_db():
@@ -211,6 +230,12 @@ def redirect(url: str, status_code: int = 303) -> RedirectResponse:
 def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return dict(row) if row else None
 
+
+def clean_optional(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
 
 def configured_ffmpeg_path() -> str:
     configured = os.getenv("FFMPEG_PATH", "").strip().strip("\"'")
@@ -297,9 +322,14 @@ def get_job(conn: sqlite3.Connection, job_id: int) -> dict[str, Any] | None:
     row = conn.execute(
         """
         SELECT live_jobs.*, videos.filename AS video_filename, videos.path AS video_path,
-               videos.original_name AS video_original_name
+               videos.original_name AS video_original_name,
+               channels.name AS channel_table_name,
+               channels.handle AS channel_handle,
+               channels.is_active AS channel_is_active,
+               COALESCE(channels.name, live_jobs.channel_name) AS display_channel_name
         FROM live_jobs
         JOIN videos ON videos.id = live_jobs.video_id
+        LEFT JOIN channels ON channels.id = live_jobs.channel_id
         WHERE live_jobs.id = ?
         """,
         (job_id,),
@@ -577,6 +607,103 @@ def test_ffmpeg(_: None = Depends(require_admin)):
         return redirect(f"/?{urlencode({'message': 'FFmpeg detected: ' + (info.get('version') or info['path'])})}")
     return redirect(f"/?{urlencode({'error': 'FFmpeg test failed: ' + (info.get('error') or info['path'])})}")
 
+@app.post("/channels")
+def create_channel(
+    name: str = Form(...),
+    handle: str | None = Form(None),
+    niche: str | None = Form(None),
+    notes: str | None = Form(None),
+    default_stream_key: str | None = Form(None),
+    is_active: str | None = Form(None),
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    clean_name = name.strip()
+    if not clean_name:
+        return redirect(f"/?{urlencode({'error': 'Channel name is required.'})}")
+    now = dt_to_str(local_now())
+    db.execute(
+        """
+        INSERT INTO channels (
+            name, handle, niche, notes, default_stream_key, is_active, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            clean_name,
+            clean_optional(handle),
+            clean_optional(niche),
+            clean_optional(notes),
+            clean_optional(default_stream_key),
+            1 if is_active else 0,
+            now,
+            now,
+        ),
+    )
+    db.commit()
+    return redirect(f"/?{urlencode({'message': 'Channel added.'})}")
+
+@app.post("/channels/{channel_id}/update")
+def update_channel(
+    channel_id: int,
+    name: str = Form(...),
+    handle: str | None = Form(None),
+    niche: str | None = Form(None),
+    notes: str | None = Form(None),
+    default_stream_key: str | None = Form(None),
+    is_active: str | None = Form(None),
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    clean_name = name.strip()
+    if not clean_name:
+        return redirect(f"/?{urlencode({'error': 'Channel name is required.'})}")
+    channel = db.execute("SELECT id FROM channels WHERE id = ?", (channel_id,)).fetchone()
+    if not channel:
+        return redirect(f"/?{urlencode({'error': 'Channel was not found.'})}")
+    now = dt_to_str(local_now())
+    db.execute(
+        """
+        UPDATE channels
+        SET name = ?, handle = ?, niche = ?, notes = ?, default_stream_key = ?,
+            is_active = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            clean_name,
+            clean_optional(handle),
+            clean_optional(niche),
+            clean_optional(notes),
+            clean_optional(default_stream_key),
+            1 if is_active else 0,
+            now,
+            channel_id,
+        ),
+    )
+    db.commit()
+    return redirect(f"/?{urlencode({'message': 'Channel updated.'})}")
+
+@app.post("/channels/{channel_id}/delete")
+def delete_channel(
+    channel_id: int,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    channel = db.execute("SELECT id FROM channels WHERE id = ?", (channel_id,)).fetchone()
+    if not channel:
+        return redirect(f"/?{urlencode({'error': 'Channel was not found.'})}")
+    usage_count = db.execute("SELECT COUNT(*) FROM live_jobs WHERE channel_id = ?", (channel_id,)).fetchone()[0]
+    if usage_count:
+        db.execute(
+            "UPDATE channels SET is_active = 0, updated_at = ? WHERE id = ?",
+            (dt_to_str(local_now()), channel_id),
+        )
+        db.commit()
+        return redirect(f"/?{urlencode({'message': 'Channel is used by live jobs, so it was set inactive.'})}")
+    db.execute("DELETE FROM channels WHERE id = ?", (channel_id,))
+    db.commit()
+    return redirect(f"/?{urlencode({'message': 'Channel deleted.'})}")
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard(
     request: Request,
@@ -591,11 +718,35 @@ def dashboard(
         for row in db.execute(
             """
             SELECT live_jobs.*, videos.filename AS video_filename, videos.original_name AS video_original_name,
-                   videos.path AS video_path
+                   videos.path AS video_path,
+                   channels.name AS channel_table_name,
+                   channels.handle AS channel_handle,
+                   channels.is_active AS channel_is_active,
+                   COALESCE(channels.name, live_jobs.channel_name) AS display_channel_name
             FROM live_jobs
             JOIN videos ON videos.id = live_jobs.video_id
+            LEFT JOIN channels ON channels.id = live_jobs.channel_id
             ORDER BY live_jobs.created_at DESC
             """
+        ).fetchall()
+    ]
+    channels = [
+        dict(row)
+        for row in db.execute(
+            """
+            SELECT channels.*,
+                   COUNT(live_jobs.id) AS live_job_count
+            FROM channels
+            LEFT JOIN live_jobs ON live_jobs.channel_id = channels.id
+            GROUP BY channels.id
+            ORDER BY channels.is_active DESC, channels.name COLLATE NOCASE
+            """
+        ).fetchall()
+    ]
+    active_channels = [
+        dict(row)
+        for row in db.execute(
+            "SELECT * FROM channels WHERE is_active = 1 ORDER BY name COLLATE NOCASE"
         ).fetchall()
     ]
     totals = {
@@ -620,6 +771,8 @@ def dashboard(
             "request": request,
             "videos": videos,
             "jobs": jobs,
+            "channels": channels,
+            "active_channels": active_channels,
             "totals": totals,
             "warnings": warnings,
             "message": message,
@@ -662,9 +815,9 @@ def upload_video(
 def create_job(
     request: Request,
     live_name: str = Form(...),
-    channel_name: str = Form(...),
+    channel_id: int | None = Form(None),
     video_id: int = Form(...),
-    stream_key: str = Form(...),
+    stream_key: str = Form(""),
     schedule_mode: str = Form("manual_now"),
     start_at: str | None = Form(None),
     end_at: str | None = Form(None),
@@ -674,8 +827,13 @@ def create_job(
     _: None = Depends(require_admin),
 ):
     clean_live_name = live_name.strip()
-    clean_channel_name = channel_name.strip()
-    clean_stream_key = stream_key.strip()
+    if channel_id is None:
+        return redirect(f"/?{urlencode({'error': 'Select an active channel first.'})}")
+    channel = db.execute("SELECT * FROM channels WHERE id = ? AND is_active = 1", (channel_id,)).fetchone()
+    if not channel:
+        return redirect(f"/?{urlencode({'error': 'Select an active channel first.'})}")
+    clean_channel_name = channel["name"]
+    clean_stream_key = stream_key.strip() or (channel["default_stream_key"] or "").strip()
     if not clean_live_name or not clean_channel_name or not clean_stream_key:
         return redirect("/?error=Live%20name,%20channel,%20and%20stream%20key%20are%20required")
     if status not in STATUSES - {"running"}:
@@ -729,14 +887,15 @@ def create_job(
     db.execute(
         """
         INSERT INTO live_jobs (
-            live_name, channel_name, video_id, stream_key, start_at, end_at,
+            live_name, channel_name, channel_id, video_id, stream_key, start_at, end_at,
             duration_minutes, status, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             clean_live_name,
             clean_channel_name,
+            channel_id,
             video_id,
             clean_stream_key,
             dt_to_str(start_value),
