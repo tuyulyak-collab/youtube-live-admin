@@ -110,7 +110,7 @@ Uploaded videos are saved to `uploads/videos`. Uploaded audio is saved to `uploa
 
 The admin UI is split into tabs with a responsive dark dashboard layout:
 
-- `Dashboard`: summary stats, History summary for today, FFmpeg status, quick live job overview, and latest log preview.
+- `Dashboard`: live/channel monitoring panel with status totals, Live Monitor, Channel Matrix, compact System Monitor, FFmpeg diagnostics, and latest log preview.
 - `Channels`: channel records used by Live Jobs. A placeholder note is shown while the full channel workflow continues to evolve.
 - `Video Library`: MP4 upload and uploaded video list.
 - `Audio Library`: global MP3, WAV, and M4A uploads with duration, size, preview, and delete controls.
@@ -307,6 +307,36 @@ http://127.0.0.1:8000/health/details
 ```
 
 It reports app, database, FFmpeg, disk space, active jobs count, FFmpeg process count, and current warnings.
+
+## Dashboard Monitoring
+
+The dashboard is focused on local live/channel monitoring from SQLite. It does not use the YouTube API.
+
+Top dashboard cards show:
+
+- Total Videos
+- Total Live Jobs
+- Running
+- Queued
+- Scheduled
+- Stopped
+- Done
+- Errors
+
+`Live Monitor` prioritizes jobs that need attention:
+
+- error jobs first
+- running jobs
+- queued jobs
+- scheduled jobs
+
+Each row links back to Live Jobs, Start/Stop, and Logs.
+
+`Channel Matrix` is a per-channel recap from local app data. It shows total jobs, running/queued/scheduled/stopped/done/error counts, playlist count, last job, and next scheduled job.
+
+The FFmpeg dashboard card shows a short status and short version by default. Open `Show details` to see the full FFmpeg path and full version output.
+
+The admin UI includes a Light/Dark toggle. Dark mode remains the default admin style; Light mode uses a clean white and soft-blue palette. The preference is stored in browser `localStorage`.
 
 ## History And Job Statuses
 

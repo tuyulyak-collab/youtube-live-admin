@@ -152,7 +152,7 @@ def usage_bar_class(percent: float | int | None) -> str:
         value = float(percent)
     except (TypeError, ValueError):
         return "bg-zinc-700"
-    if value >= 90:
+    if value >= 95:
         return "bg-red-500"
     if value >= 80:
         return "bg-amber-500"
@@ -1061,6 +1061,112 @@ def dashboard_history_summary(conn: sqlite3.Connection) -> dict[str, Any]:
         "last_failed": last_failed,
     }
 
+
+def short_ffmpeg_version(ffmpeg_info: dict[str, Any]) -> str:
+    version = ffmpeg_info.get("version") or ""
+    if not version:
+        return "-"
+    first_line = version.splitlines()[0]
+    return first_line if len(first_line) <= 90 else f"{first_line[:87]}..."
+
+def dashboard_status_totals(conn: sqlite3.Connection) -> dict[str, int]:
+    return {
+        "videos": conn.execute("SELECT COUNT(*) FROM videos").fetchone()[0],
+        "jobs": conn.execute("SELECT COUNT(*) FROM live_jobs").fetchone()[0],
+        "running": conn.execute("SELECT COUNT(*) FROM live_jobs WHERE status = 'running'").fetchone()[0],
+        "queued": conn.execute("SELECT COUNT(*) FROM live_jobs WHERE status = 'queued'").fetchone()[0],
+        "scheduled": conn.execute("SELECT COUNT(*) FROM live_jobs WHERE status = 'scheduled'").fetchone()[0],
+        "stopped": conn.execute("SELECT COUNT(*) FROM live_jobs WHERE status = 'stopped'").fetchone()[0],
+        "done": conn.execute("SELECT COUNT(*) FROM live_jobs WHERE status = 'done'").fetchone()[0],
+        "error": conn.execute("SELECT COUNT(*) FROM live_jobs WHERE status = 'error'").fetchone()[0],
+    }
+
+def dashboard_live_monitor_jobs(conn: sqlite3.Connection, limit: int = 12) -> list[dict[str, Any]]:
+    jobs = [
+        dict(row)
+        for row in conn.execute(
+            """
+            SELECT live_jobs.*, videos.filename AS video_filename, videos.original_name AS video_original_name,
+                   videos.path AS video_path,
+                   COALESCE(channels.name, live_jobs.channel_name) AS display_channel_name,
+                   audio_playlists.name AS audio_playlist_name
+            FROM live_jobs
+            JOIN videos ON videos.id = live_jobs.video_id
+            LEFT JOIN channels ON channels.id = live_jobs.channel_id
+            LEFT JOIN audio_playlists ON audio_playlists.id = live_jobs.audio_playlist_id
+            WHERE live_jobs.archived_at IS NULL
+              AND live_jobs.status IN ('error', 'running', 'queued', 'scheduled')
+            ORDER BY CASE live_jobs.status
+                       WHEN 'error' THEN 0
+                       WHEN 'running' THEN 1
+                       WHEN 'queued' THEN 2
+                       WHEN 'scheduled' THEN 3
+                       ELSE 4
+                     END,
+                     CASE WHEN live_jobs.start_at IS NULL THEN 1 ELSE 0 END,
+                     live_jobs.start_at ASC,
+                     live_jobs.updated_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    ]
+    return annotate_job_file_state(jobs)
+
+def channel_matrix(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    rows = [
+        dict(row)
+        for row in conn.execute(
+            """
+            SELECT channels.*,
+                   COUNT(DISTINCT live_jobs.id) AS total_live_jobs,
+                   COUNT(DISTINCT CASE WHEN live_jobs.status = 'running' THEN live_jobs.id END) AS running_count,
+                   COUNT(DISTINCT CASE WHEN live_jobs.status = 'queued' THEN live_jobs.id END) AS queued_count,
+                   COUNT(DISTINCT CASE WHEN live_jobs.status = 'scheduled' THEN live_jobs.id END) AS scheduled_count,
+                   COUNT(DISTINCT CASE WHEN live_jobs.status = 'stopped' THEN live_jobs.id END) AS stopped_count,
+                   COUNT(DISTINCT CASE WHEN live_jobs.status = 'done' THEN live_jobs.id END) AS done_count,
+                   COUNT(DISTINCT CASE WHEN live_jobs.status = 'error' THEN live_jobs.id END) AS error_count,
+                   COUNT(DISTINCT audio_playlists.id) AS playlist_count
+            FROM channels
+            LEFT JOIN live_jobs ON live_jobs.channel_id = channels.id
+            LEFT JOIN audio_playlists ON audio_playlists.channel_id = channels.id
+            GROUP BY channels.id
+            ORDER BY channels.is_active DESC, channels.name COLLATE NOCASE
+            """
+        ).fetchall()
+    ]
+    now = dt_to_str(local_now())
+    for channel in rows:
+        channel_id = channel["id"]
+        last_job = conn.execute(
+            """
+            SELECT live_name, status, updated_at, created_at
+            FROM live_jobs
+            WHERE channel_id = ?
+            ORDER BY COALESCE(updated_at, created_at) DESC, id DESC
+            LIMIT 1
+            """,
+            (channel_id,),
+        ).fetchone()
+        next_job = conn.execute(
+            """
+            SELECT live_name, start_at, status
+            FROM live_jobs
+            WHERE channel_id = ?
+              AND archived_at IS NULL
+              AND start_at IS NOT NULL
+              AND datetime(start_at) >= datetime(?)
+              AND status IN ('queued', 'scheduled')
+            ORDER BY datetime(start_at) ASC, id ASC
+            LIMIT 1
+            """,
+            (channel_id, now),
+        ).fetchone()
+        channel["last_job"] = dict(last_job) if last_job else None
+        channel["next_scheduled_job"] = dict(next_job) if next_job else None
+        for key in ("total_live_jobs", "running_count", "queued_count", "scheduled_count", "stopped_count", "done_count", "error_count", "playlist_count"):
+            channel[key] = int(channel.get(key) or 0)
+    return rows
 
 def get_stop_at(job: dict[str, Any]) -> datetime | None:
     expected_end_at = parse_dt(job.get("expected_end_at"))
@@ -2061,13 +2167,7 @@ def admin_context(
     ready_playlists = [
         playlist for playlist in audio_playlists if playlist.get("status") == "ready" and playlist.get("prepared_audio_path")
     ]
-    totals = {
-        "videos": db.execute("SELECT COUNT(*) FROM videos").fetchone()[0],
-        "jobs": db.execute("SELECT COUNT(*) FROM live_jobs").fetchone()[0],
-        "running": db.execute("SELECT COUNT(*) FROM live_jobs WHERE status = 'running'").fetchone()[0],
-        "stopped": db.execute("SELECT COUNT(*) FROM live_jobs WHERE status = 'stopped'").fetchone()[0],
-        "error": db.execute("SELECT COUNT(*) FROM live_jobs WHERE status = 'error'").fetchone()[0],
-    }
+    totals = dashboard_status_totals(db)
     ffmpeg_info = ffmpeg_probe()
     warnings = []
     if not ffmpeg_info["detected"]:
@@ -2081,6 +2181,8 @@ def admin_context(
     completed_jobs = [job for job in history_jobs if job.get("status") in FINAL_STATUSES]
     history_totals = history_summary(history_jobs)
     dashboard_history = dashboard_history_summary(db)
+    live_monitor_jobs = dashboard_live_monitor_jobs(db)
+    channel_rows = channel_matrix(db)
     system_info = system_monitor(db)
     warnings.extend(system_info["warnings"])
     return {
@@ -2099,6 +2201,8 @@ def admin_context(
         "completed_jobs": completed_jobs,
         "history_totals": history_totals,
         "dashboard_history": dashboard_history,
+        "live_monitor_jobs": live_monitor_jobs,
+        "channel_matrix": channel_rows,
         "system_info": system_info,
         "channels": channels,
         "active_channels": active_channels,
@@ -2111,6 +2215,7 @@ def admin_context(
         "message": message,
         "error": error,
         "ffmpeg_info": ffmpeg_info,
+        "ffmpeg_short_version": short_ffmpeg_version(ffmpeg_info),
         "latest_log": latest_any_log(db),
         "display_dt": display_dt,
         "display_dt_local": display_dt_local,

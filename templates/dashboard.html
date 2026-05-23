@@ -1,13 +1,13 @@
 {% extends "admin.html" %}
 {% block title %}Dashboard{% endblock %}
 {% block admin_content %}
-<section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+<section class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
   <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-    <p class="text-sm text-zinc-400">Total videos</p>
+    <p class="text-sm text-zinc-400">Total Videos</p>
     <p class="mt-2 text-3xl font-semibold">{{ totals.videos }}</p>
   </div>
   <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-    <p class="text-sm text-zinc-400">Total live jobs</p>
+    <p class="text-sm text-zinc-400">Total Live Jobs</p>
     <p class="mt-2 text-3xl font-semibold">{{ totals.jobs }}</p>
   </div>
   <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
@@ -15,54 +15,24 @@
     <p class="mt-2 text-3xl font-semibold text-emerald-400">{{ totals.running }}</p>
   </div>
   <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <p class="text-sm text-zinc-400">Queued</p>
+    <p class="mt-2 text-3xl font-semibold text-sky-300">{{ totals.queued }}</p>
+  </div>
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <p class="text-sm text-zinc-400">Scheduled</p>
+    <p class="mt-2 text-3xl font-semibold text-indigo-300">{{ totals.scheduled }}</p>
+  </div>
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
     <p class="text-sm text-zinc-400">Stopped</p>
     <p class="mt-2 text-3xl font-semibold">{{ totals.stopped }}</p>
   </div>
   <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <p class="text-sm text-zinc-400">Done</p>
+    <p class="mt-2 text-3xl font-semibold text-teal-300">{{ totals.done }}</p>
+  </div>
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
     <p class="text-sm text-zinc-400">Errors</p>
     <p class="mt-2 text-3xl font-semibold text-red-400">{{ totals.error }}</p>
-  </div>
-</section>
-
-<section class="mt-6 rounded-lg border border-zinc-800 bg-zinc-900 p-4" data-auto-refresh="30000">
-  <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-    <div>
-      <h3 class="text-base font-semibold">System Monitor</h3>
-      <p class="mt-1 text-sm text-zinc-400">Server resource snapshot for live streaming capacity.</p>
-    </div>
-    <button type="button" onclick="window.location.reload()" class="rounded-md border border-zinc-700 px-4 py-2 text-sm font-medium hover:bg-zinc-800">Refresh</button>
-  </div>
-  <div class="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
-    <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
-      <p class="text-sm text-zinc-400">CPU Usage</p>
-      <p class="mt-2 text-2xl font-semibold">{{ system_info.cpu_percent if system_info.cpu_percent is not none else "-" }}{% if system_info.cpu_percent is not none %}%{% endif %}</p>
-      <div class="mt-3 h-2 rounded-full bg-zinc-800"><div class="h-2 rounded-full {{ usage_bar_class(system_info.cpu_percent) }}" style="width: {{ system_info.cpu_percent or 0 }}%"></div></div>
-    </div>
-    <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
-      <p class="text-sm text-zinc-400">RAM Usage</p>
-      <p class="mt-2 text-2xl font-semibold">{{ system_info.ram_percent if system_info.ram_percent is not none else "-" }}{% if system_info.ram_percent is not none %}%{% endif %}</p>
-      <p class="mt-1 text-xs text-zinc-500">{{ system_info.ram_used }} / {{ system_info.ram_total }}</p>
-      <div class="mt-3 h-2 rounded-full bg-zinc-800"><div class="h-2 rounded-full {{ usage_bar_class(system_info.ram_percent) }}" style="width: {{ system_info.ram_percent or 0 }}%"></div></div>
-    </div>
-    <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
-      <p class="text-sm text-zinc-400">Disk Usage</p>
-      <p class="mt-2 text-2xl font-semibold">{{ system_info.disk_percent if system_info.disk_percent is not none else "-" }}{% if system_info.disk_percent is not none %}%{% endif %}</p>
-      <p class="mt-1 text-xs text-zinc-500">{{ system_info.disk_used }} / {{ system_info.disk_total }}</p>
-      <div class="mt-3 h-2 rounded-full bg-zinc-800"><div class="h-2 rounded-full {{ usage_bar_class(system_info.disk_percent) }}" style="width: {{ system_info.disk_percent or 0 }}%"></div></div>
-    </div>
-    <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
-      <p class="text-sm text-zinc-400">Running FFmpeg Processes</p>
-      <p class="mt-2 text-3xl font-semibold">{{ system_info.ffmpeg_process_count }}</p>
-      <p class="mt-1 text-xs text-zinc-500">{{ system_info.running_jobs|length }} running jobs tracked</p>
-    </div>
-    <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
-      <p class="text-sm text-zinc-400">App Uptime</p>
-      <p class="mt-2 text-xl font-semibold">{{ system_info.app_uptime }}</p>
-    </div>
-    <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
-      <p class="text-sm text-zinc-400">Server Time</p>
-      <p class="mt-2 text-xl font-semibold">{{ system_info.server_time }}</p>
-    </div>
   </div>
 </section>
 
@@ -99,42 +69,182 @@
   </div>
 </section>
 
-<section class="mt-6 grid gap-6 lg:grid-cols-3">
-  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4 lg:col-span-2">
-    <h3 class="text-base font-semibold">Quick Overview</h3>
-    <div class="mt-4 overflow-x-auto">
-      <table class="min-w-full divide-y divide-zinc-800 text-sm">
-        <thead class="text-left text-xs uppercase tracking-wide text-zinc-500">
-          <tr><th class="py-2 pr-4">Live</th><th class="py-2 pr-4">Channel</th><th class="py-2 pr-4">Status</th><th class="py-2">Schedule</th></tr>
-        </thead>
-        <tbody class="divide-y divide-zinc-800">
-          {% for job in jobs[:5] %}
-            <tr>
-              <td class="py-3 pr-4 font-medium">{{ job.live_name }}</td>
-              <td class="py-3 pr-4 text-zinc-300">{{ job.display_channel_name or job.channel_name }}</td>
-              <td class="py-3 pr-4"><span class="rounded-full bg-zinc-800 px-2 py-1 text-xs">{{ job.status }}</span></td>
-              <td class="py-3 text-xs text-zinc-400">{% for line in job_schedule_lines(job) %}<div>{{ line }}</div>{% endfor %}</td>
-            </tr>
-          {% else %}
-            <tr><td colspan="4" class="py-6 text-center text-zinc-500">No live jobs yet.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+<section class="mt-6 rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+  <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div>
+      <h3 class="text-base font-semibold">Live Monitor</h3>
+      <p class="mt-1 text-sm text-zinc-400">Prioritas: error, running, queued, lalu scheduled.</p>
+    </div>
+    <a href="/live-jobs" class="rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400">View All Live Jobs</a>
+  </div>
+  <div class="mt-4 overflow-x-auto rounded-lg border border-zinc-800">
+    <table class="min-w-[1120px] table-fixed divide-y divide-zinc-800 text-sm">
+      <thead class="bg-zinc-950 text-left text-xs uppercase tracking-wide text-zinc-500">
+        <tr>
+          <th class="w-56 px-3 py-3">Live name</th>
+          <th class="w-44 px-3 py-3">Channel</th>
+          <th class="w-32 px-3 py-3">Status</th>
+          <th class="w-56 px-3 py-3">Schedule</th>
+          <th class="w-44 px-3 py-3">Duration / Countdown</th>
+          <th class="w-44 px-3 py-3">Audio playlist</th>
+          <th class="w-52 px-3 py-3 text-right">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-zinc-800">
+        {% for job in live_monitor_jobs %}
+          <tr class="align-top hover:bg-zinc-950/60">
+            <td class="px-3 py-3 font-medium"><div class="break-words">{{ job.live_name }}</div></td>
+            <td class="px-3 py-3 text-zinc-300">{{ job.display_channel_name or job.channel_name }}</td>
+            <td class="px-3 py-3"><span class="inline-flex rounded-full border px-2 py-1 text-xs font-medium {{ status_badge_class(job.status) }}">{{ job.status }}</span></td>
+            <td class="px-3 py-3 text-xs text-zinc-400">{% for line in job_schedule_lines(job) %}<div class="leading-5">{{ line }}</div>{% endfor %}</td>
+            <td class="px-3 py-3 text-zinc-300">{% if job.status == 'running' %}{{ running_duration(job) }}{% else %}{{ time_until_start(job) }}{% endif %}</td>
+            <td class="px-3 py-3 text-zinc-400">{{ job.audio_playlist_name or "video original" }}</td>
+            <td class="px-3 py-3">
+              <div class="flex flex-nowrap justify-end gap-2">
+                <a href="/live-jobs?search={{ job.live_name|urlencode }}" class="rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs font-medium hover:bg-zinc-800">View</a>
+                <form method="post" action="/jobs/{{ job.id }}/start"><button class="rounded-md bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-500">Start</button></form>
+                <form method="post" action="/jobs/{{ job.id }}/stop"><button class="rounded-md bg-red-700 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-red-600">Stop</button></form>
+                <a href="/jobs/{{ job.id }}/logs" class="rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs font-medium hover:bg-zinc-800">Logs</a>
+              </div>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="px-3 py-8 text-center text-zinc-500">No error, running, queued, or scheduled live jobs.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="mt-6 rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+  <h3 class="text-base font-semibold">Channel Matrix</h3>
+  <p class="mt-1 text-sm text-zinc-400">Rekap per channel dari database lokal aplikasi.</p>
+  <div class="mt-4 overflow-x-auto rounded-lg border border-zinc-800">
+    <table class="min-w-[1280px] table-fixed divide-y divide-zinc-800 text-sm">
+      <thead class="bg-zinc-950 text-left text-xs uppercase tracking-wide text-zinc-500">
+        <tr>
+          <th class="w-56 px-3 py-3">Channel</th>
+          <th class="w-24 px-3 py-3">Total</th>
+          <th class="w-24 px-3 py-3">Running</th>
+          <th class="w-24 px-3 py-3">Queued</th>
+          <th class="w-28 px-3 py-3">Scheduled</th>
+          <th class="w-24 px-3 py-3">Stopped</th>
+          <th class="w-20 px-3 py-3">Done</th>
+          <th class="w-20 px-3 py-3">Error</th>
+          <th class="w-24 px-3 py-3">Playlists</th>
+          <th class="w-52 px-3 py-3">Last job</th>
+          <th class="w-56 px-3 py-3">Next scheduled job</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-zinc-800">
+        {% for channel in channel_matrix %}
+          <tr class="align-top hover:bg-zinc-950/60">
+            <td class="px-3 py-3 font-medium">
+              <div class="break-words">{{ channel.name }}</div>
+              {% if channel.handle %}<div class="text-xs text-zinc-500">{{ channel.handle }}</div>{% endif %}
+            </td>
+            <td class="px-3 py-3">{{ channel.total_live_jobs }}</td>
+            <td class="px-3 py-3 text-emerald-300">{{ channel.running_count }}</td>
+            <td class="px-3 py-3 text-sky-300">{{ channel.queued_count }}</td>
+            <td class="px-3 py-3 text-indigo-300">{{ channel.scheduled_count }}</td>
+            <td class="px-3 py-3">{{ channel.stopped_count }}</td>
+            <td class="px-3 py-3 text-teal-300">{{ channel.done_count }}</td>
+            <td class="px-3 py-3 text-red-300">{{ channel.error_count }}</td>
+            <td class="px-3 py-3">{{ channel.playlist_count }}</td>
+            <td class="px-3 py-3">
+              {% if channel.last_job %}
+                <div class="break-words">{{ channel.last_job.live_name }}</div>
+                <div class="mt-1 text-xs text-zinc-500">{{ channel.last_job.status }}</div>
+              {% else %}
+                <span class="text-zinc-500">-</span>
+              {% endif %}
+            </td>
+            <td class="px-3 py-3">
+              {% if channel.next_scheduled_job %}
+                <div class="break-words">{{ channel.next_scheduled_job.live_name }}</div>
+                <div class="mt-1 text-xs text-zinc-500">{{ display_dt(channel.next_scheduled_job.start_at) }}</div>
+              {% else %}
+                <span class="text-zinc-500">-</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="11" class="px-3 py-8 text-center text-zinc-500">No channels yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="mt-6 grid gap-6 xl:grid-cols-3">
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-5 xl:col-span-2" data-auto-refresh="30000">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h3 class="text-base font-semibold">System Monitor</h3>
+        <p class="mt-1 text-sm text-zinc-400">Compact server snapshot.</p>
+      </div>
+      <button type="button" onclick="window.location.reload()" class="rounded-md border border-zinc-700 px-4 py-2 text-sm font-medium hover:bg-zinc-800">Refresh</button>
+    </div>
+    <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+      <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+        <p class="text-xs text-zinc-500">CPU</p>
+        <p class="mt-1 text-xl font-semibold">{{ system_info.cpu_percent if system_info.cpu_percent is not none else "-" }}{% if system_info.cpu_percent is not none %}%{% endif %}</p>
+        <div class="mt-2 h-1.5 rounded-full bg-zinc-800"><div class="h-1.5 rounded-full {{ usage_bar_class(system_info.cpu_percent) }}" style="width: {{ system_info.cpu_percent or 0 }}%"></div></div>
+      </div>
+      <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+        <p class="text-xs text-zinc-500">RAM</p>
+        <p class="mt-1 text-xl font-semibold">{{ system_info.ram_percent if system_info.ram_percent is not none else "-" }}{% if system_info.ram_percent is not none %}%{% endif %}</p>
+        <div class="mt-2 h-1.5 rounded-full bg-zinc-800"><div class="h-1.5 rounded-full {{ usage_bar_class(system_info.ram_percent) }}" style="width: {{ system_info.ram_percent or 0 }}%"></div></div>
+      </div>
+      <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+        <p class="text-xs text-zinc-500">Disk</p>
+        <p class="mt-1 text-xl font-semibold">{{ system_info.disk_percent if system_info.disk_percent is not none else "-" }}{% if system_info.disk_percent is not none %}%{% endif %}</p>
+        <div class="mt-2 h-1.5 rounded-full bg-zinc-800"><div class="h-1.5 rounded-full {{ usage_bar_class(system_info.disk_percent) }}" style="width: {{ system_info.disk_percent or 0 }}%"></div></div>
+      </div>
+      <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+        <p class="text-xs text-zinc-500">FFmpeg Processes</p>
+        <p class="mt-1 text-2xl font-semibold">{{ system_info.ffmpeg_process_count }}</p>
+      </div>
+      <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+        <p class="text-xs text-zinc-500">App Uptime</p>
+        <p class="mt-1 text-sm font-semibold">{{ system_info.app_uptime }}</p>
+      </div>
+      <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+        <p class="text-xs text-zinc-500">Server Time</p>
+        <p class="mt-1 text-sm font-semibold">{{ system_info.server_time }}</p>
+      </div>
     </div>
   </div>
 
-  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
     <h3 class="text-base font-semibold">FFmpeg Status</h3>
-    <p class="mt-4 text-sm text-zinc-400">Status</p>
-    {% if ffmpeg_info.detected %}
-      <p class="font-medium text-emerald-400">detected</p>
-    {% else %}
-      <p class="font-medium text-red-400">not detected</p>
-    {% endif %}
-    <p class="mt-4 text-sm text-zinc-400">Path used</p>
-    <p class="break-all text-sm">{{ ffmpeg_info.path }}</p>
-    <p class="mt-4 text-sm text-zinc-400">Version</p>
-    <p class="break-words text-sm">{{ ffmpeg_info.version or "-" }}</p>
+    <div class="mt-4 grid gap-3 text-sm">
+      <div>
+        <p class="text-zinc-500">Status</p>
+        {% if ffmpeg_info.detected %}
+          <p class="font-medium text-emerald-400">detected</p>
+        {% else %}
+          <p class="font-medium text-red-400">not detected</p>
+        {% endif %}
+      </div>
+      <div>
+        <p class="text-zinc-500">Version</p>
+        <p class="break-words">{{ ffmpeg_short_version }}</p>
+      </div>
+      <details class="rounded-md border border-zinc-800 bg-zinc-950 p-3" data-ffmpeg-details>
+        <summary class="cursor-pointer text-sm font-medium" data-details-summary>Show details</summary>
+        <div class="mt-3 space-y-3 text-sm">
+          <div>
+            <p class="text-zinc-500">Full path</p>
+            <p class="break-all">{{ ffmpeg_info.path }}</p>
+          </div>
+          <div>
+            <p class="text-zinc-500">Full version output</p>
+            <pre class="mt-1 max-h-40 overflow-auto rounded-md bg-black p-3 text-xs leading-relaxed text-zinc-200">{{ ffmpeg_info.version or ffmpeg_info.error or "-" }}</pre>
+          </div>
+        </div>
+      </details>
+    </div>
   </div>
 </section>
 
@@ -152,6 +262,12 @@
   document.querySelectorAll("[data-auto-refresh]").forEach((element) => {
     const delay = Number(element.dataset.autoRefresh || "0");
     if (delay > 0) window.setTimeout(() => window.location.reload(), delay);
+  });
+  document.querySelectorAll("[data-ffmpeg-details]").forEach((details) => {
+    const summary = details.querySelector("[data-details-summary]");
+    details.addEventListener("toggle", () => {
+      if (summary) summary.textContent = details.open ? "Hide details" : "Show details";
+    });
   });
 </script>
 {% endblock %}

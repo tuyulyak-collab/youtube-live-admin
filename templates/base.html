@@ -5,6 +5,57 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}YouTube Live Manager{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    (function () {
+      const theme = localStorage.getItem("admin-theme") || "dark";
+      document.documentElement.classList.toggle("theme-light", theme === "light");
+    })();
+  </script>
+  <style>
+    html.theme-light body,
+    html.theme-light .bg-zinc-950,
+    html.theme-light .bg-black {
+      background-color: #f8fafc !important;
+      color: #0f172a !important;
+    }
+    html.theme-light .bg-zinc-900,
+    html.theme-light .bg-zinc-800 {
+      background-color: #ffffff !important;
+      color: #0f172a !important;
+    }
+    html.theme-light .border-zinc-800,
+    html.theme-light .border-zinc-700 {
+      border-color: #dbeafe !important;
+    }
+    html.theme-light .text-zinc-100,
+    html.theme-light .text-zinc-200,
+    html.theme-light .text-zinc-300,
+    html.theme-light .text-zinc-400,
+    html.theme-light .text-zinc-500,
+    html.theme-light .text-zinc-600 {
+      color: #334155 !important;
+    }
+    html.theme-light input,
+    html.theme-light select,
+    html.theme-light textarea,
+    html.theme-light pre {
+      background-color: #ffffff !important;
+      color: #0f172a !important;
+      border-color: #bfdbfe !important;
+    }
+    html.theme-light .hover\:bg-zinc-800:hover,
+    html.theme-light .hover\:bg-zinc-900:hover,
+    html.theme-light .hover\:bg-zinc-950:hover {
+      background-color: #eff6ff !important;
+    }
+    html.theme-light .bg-emerald-500 {
+      background-color: #2563eb !important;
+      color: #ffffff !important;
+    }
+    html.theme-light .text-zinc-950 {
+      color: #ffffff !important;
+    }
+  </style>
 </head>
 <body class="min-h-screen bg-zinc-100 text-zinc-950">
   {% block body %}{% endblock %}
