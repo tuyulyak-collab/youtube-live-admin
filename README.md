@@ -38,6 +38,26 @@ notepad .env
 
 Change at least `ADMIN_PASSWORD` and `APP_SECRET_KEY` before using the app beyond local testing.
 
+## FFmpeg Configuration
+
+By default, the app runs `ffmpeg` from the system `PATH`. This works when `ffmpeg -version` succeeds in a new terminal.
+
+You can optionally set `FFMPEG_PATH` in `.env` to use a specific executable. Leave it empty to use the system `PATH`.
+
+Windows example:
+
+```text
+FFMPEG_PATH=C:\ffmpeg\bin\ffmpeg.exe
+```
+
+Ubuntu example:
+
+```text
+FFMPEG_PATH=/usr/bin/ffmpeg
+```
+
+The dashboard shows FFmpeg status, the path used, and the detected version. Use the `Test FFmpeg` button to run `ffmpeg -version` with the same executable that Start Live and the scheduler use.
+
 ## Ubuntu Setup
 
 On Ubuntu, run:
@@ -85,6 +105,16 @@ admin / admin123
 ```
 
 Uploaded videos are saved to `uploads/videos`. FFmpeg logs are saved to `uploads/logs`. SQLite data is saved to `data/app.db`.
+
+## Scheduling Modes
+
+Live jobs support three scheduling modes:
+
+- `Manual`: no start or end time is required. You can start the live stream later with the `Start` button. Duration is optional.
+- `Start & selesai`: set a start datetime and an end datetime. The app calculates the duration automatically, and the end datetime must be after the start datetime.
+- `Start & durasi`: set a start datetime and duration in minutes. The app previews the automatic finish time.
+
+Existing jobs remain compatible because the app still stores scheduling data in `start_at`, `end_at`, and `duration_minutes`.
 
 ## Access From Another Device On The Same WiFi
 

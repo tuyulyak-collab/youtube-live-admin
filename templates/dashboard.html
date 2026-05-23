@@ -47,79 +47,160 @@
     </div>
   </section>
 
+  <section class="mt-6 rounded-lg border border-zinc-200 bg-white p-4">
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <h2 class="text-base font-semibold">FFmpeg Diagnostics</h2>
+        <div class="mt-3 grid gap-3 text-sm sm:grid-cols-3">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Status</p>
+            {% if ffmpeg_info.detected %}
+              <p class="mt-1 font-medium text-emerald-700">detected</p>
+            {% else %}
+              <p class="mt-1 font-medium text-red-700">not detected</p>
+            {% endif %}
+          </div>
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Path used</p>
+            <p class="mt-1 break-all font-medium">{{ ffmpeg_info.path }}</p>
+          </div>
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Version</p>
+            <p class="mt-1 break-words font-medium">{{ ffmpeg_info.version or "-" }}</p>
+          </div>
+        </div>
+        {% if ffmpeg_info.error %}
+          <p class="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">{{ ffmpeg_info.error }}</p>
+        {% endif %}
+      </div>
+      <form method="post" action="/ffmpeg/test" class="shrink-0">
+        <button class="w-full rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 lg:w-auto">Test FFmpeg</button>
+      </form>
+    </div>
+  </section>
+
   <section class="mt-6 grid gap-6 lg:grid-cols-3">
     <div class="rounded-lg border border-zinc-200 bg-white p-4">
       <h2 class="text-base font-semibold">Upload MP4</h2>
       <p class="mt-1 text-sm text-zinc-600">File baru bisa dipakai di Live Job setelah berhasil di-upload.</p>
-      <form method="post" action="/videos" enctype="multipart/form-data" class="mt-4 space-y-4">
-        <div class="rounded-md border border-zinc-200 bg-zinc-50 p-3">
+      <form method="post" action="/videos" enctype="multipart/form-data" class="mt-3 space-y-3">
+        <div>
           <label class="block">
             <span class="flex items-center gap-2 text-sm font-semibold">
               <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-xs text-white">1</span>
-              Step 1: Choose video file
+              Langkah 1: Pilih file video
             </span>
-            <input id="upload-video-file" name="file" type="file" accept="video/mp4,.mp4" required class="mt-3 block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-zinc-900 file:px-3 file:py-2 file:text-white">
+            <input id="upload-video-file" name="file" type="file" accept="video/mp4,.mp4" required class="mt-2 block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-zinc-900 file:px-3 file:py-2 file:text-white">
           </label>
-          <p id="upload-pending-warning" class="mt-3 hidden rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">Video sudah dipilih, tapi belum di-upload. Klik Upload Video agar muncul di daftar Live Job.</p>
+          <p id="upload-pending-warning" class="mt-2 hidden rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">Video sudah dipilih, tapi belum di-upload. Klik Upload Video agar muncul di daftar Live Job.</p>
         </div>
-        <div class="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-          <p class="mb-3 flex items-center gap-2 text-sm font-semibold">
+        <div>
+          <p class="mb-2 flex items-center gap-2 text-sm font-semibold">
             <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-xs text-white">2</span>
-            Step 2: Click Upload Video
+            Langkah 2: Upload video
           </p>
           <button class="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700">Upload Video</button>
         </div>
       </form>
+      <div class="mt-4 border-t border-zinc-200 pt-3">
+        <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Video terakhir di-upload</p>
+        {% if videos %}
+          <p class="mt-1 truncate text-sm font-medium">{{ videos[0].original_name }}</p>
+          <p class="text-xs text-zinc-500">{{ display_dt(videos[0].uploaded_at) }}</p>
+        {% else %}
+          <p class="mt-1 text-sm text-zinc-500">Belum ada video yang di-upload.</p>
+        {% endif %}
+      </div>
     </div>
 
     <div class="rounded-lg border border-zinc-200 bg-white p-4 lg:col-span-2">
       <h2 class="text-base font-semibold">Create Live Job</h2>
-      <form id="create-job-form" method="post" action="/jobs" class="mt-4 grid gap-4 sm:grid-cols-2">
-        <label class="block">
-          <span class="text-sm font-medium">Live name</span>
-          <input id="live-name-input" name="live_name" required class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
-        </label>
-        <label class="block">
-          <span class="text-sm font-medium">Channel name</span>
-          <input id="channel-name-input" name="channel_name" required class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
-        </label>
-        <label class="block sm:col-span-2">
-          <span class="text-sm font-medium">Video</span>
-          <select id="video-id-input" name="video_id" required class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
-            {% for video in videos %}
-              <option value="{{ video.id }}">{{ video.original_name }}</option>
-            {% else %}
-              <option value="">Belum ada video. Upload video terlebih dahulu.</option>
-            {% endfor %}
-          </select>
-          <span class="mt-1 block text-xs text-zinc-500">Pilih video yang sudah berhasil di-upload.</span>
-        </label>
-        <label class="block sm:col-span-2">
-          <span class="text-sm font-medium">YouTube stream key</span>
-          <input id="stream-key-input" name="stream_key" type="password" required autocomplete="off" class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
-        </label>
-        <label class="block">
-          <span class="text-sm font-medium">Start datetime</span>
-          <input name="start_at" type="datetime-local" class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
-        </label>
-        <label class="block">
-          <span class="text-sm font-medium">End datetime</span>
-          <input name="end_at" type="datetime-local" class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
-        </label>
-        <label class="block">
-          <span class="text-sm font-medium">Duration minutes</span>
-          <input name="duration_minutes" type="number" min="1" class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
-        </label>
-        <label class="block">
-          <span class="text-sm font-medium">Status</span>
-          <select name="status" class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
-            <option value="stopped">Stopped</option>
-            <option value="scheduled">Scheduled</option>
-          </select>
-        </label>
-        <div class="sm:col-span-2">
-          <button id="create-job-button" {% if not videos %}disabled{% endif %} class="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:bg-zinc-400">Create job</button>
-          <p id="create-job-helper" class="mt-2 {% if videos %}hidden {% endif %}text-xs text-amber-800">Lengkapi live name, channel, stream key, dan pilih video dulu.</p>
+      <form id="create-job-form" method="post" action="/jobs" class="mt-4 space-y-5">
+        <fieldset class="border-t border-zinc-200 pt-4">
+          <legend class="pr-3 text-sm font-semibold text-zinc-900">Informasi Live</legend>
+          <div class="mt-3 grid gap-4 sm:grid-cols-2">
+            <label class="block">
+              <span class="text-sm font-medium">Live name</span>
+              <input id="live-name-input" name="live_name" required class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+            </label>
+            <label class="block">
+              <span class="text-sm font-medium">Channel name</span>
+              <input id="channel-name-input" name="channel_name" required class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+            </label>
+            <label class="block sm:col-span-2">
+              <span class="text-sm font-medium">Video</span>
+              <select id="video-id-input" name="video_id" required class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+                {% for video in videos %}
+                  <option value="{{ video.id }}">{{ video.original_name }}</option>
+                {% else %}
+                  <option value="">Belum ada video. Upload video terlebih dahulu.</option>
+                {% endfor %}
+              </select>
+              <span class="mt-1 block text-xs text-zinc-500">Pilih video yang sudah berhasil di-upload.</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset class="border-t border-zinc-200 pt-4">
+          <legend class="pr-3 text-sm font-semibold text-zinc-900">Koneksi YouTube</legend>
+          <div class="mt-3">
+            <label class="block">
+              <span class="text-sm font-medium">YouTube stream key</span>
+              <input id="stream-key-input" name="stream_key" type="password" required autocomplete="off" class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset class="border-t border-zinc-200 pt-4">
+          <legend class="pr-3 text-sm font-semibold text-zinc-900">Jadwal Live</legend>
+          <div class="mt-3 space-y-4">
+            <div class="grid gap-2 sm:grid-cols-3">
+              <label class="flex cursor-pointer items-start gap-2 rounded-md border border-zinc-200 p-3 text-sm hover:bg-zinc-50">
+                <input type="radio" name="schedule_mode" value="manual_now" checked class="mt-1">
+                <span><span class="block font-medium">Manual</span><span class="block text-xs text-zinc-500">Start lewat tombol</span></span>
+              </label>
+              <label class="flex cursor-pointer items-start gap-2 rounded-md border border-zinc-200 p-3 text-sm hover:bg-zinc-50">
+                <input type="radio" name="schedule_mode" value="start_end" class="mt-1">
+                <span><span class="block font-medium">Start & selesai</span><span class="block text-xs text-zinc-500">Durasi dihitung otomatis</span></span>
+              </label>
+              <label class="flex cursor-pointer items-start gap-2 rounded-md border border-zinc-200 p-3 text-sm hover:bg-zinc-50">
+                <input type="radio" name="schedule_mode" value="start_duration" class="mt-1">
+                <span><span class="block font-medium">Start & durasi</span><span class="block text-xs text-zinc-500">Selesai dihitung otomatis</span></span>
+              </label>
+            </div>
+
+            <p id="schedule-mode-helper" class="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">Live bisa dimulai manual dengan tombol Start.</p>
+
+            <div class="grid gap-4 sm:grid-cols-2">
+              <label id="schedule-start-field" class="hidden">
+                <span class="text-sm font-medium">Start datetime</span>
+                <input id="schedule-start-input" name="start_at" type="datetime-local" disabled class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+              </label>
+              <label id="schedule-end-field" class="hidden">
+                <span class="text-sm font-medium">End datetime</span>
+                <input id="schedule-end-input" name="end_at" type="datetime-local" disabled class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+              </label>
+              <label id="schedule-duration-field" class="block">
+                <span class="text-sm font-medium">Duration minutes</span>
+                <input id="schedule-duration-input" name="duration_minutes" type="number" min="1" class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+              </label>
+              <div id="schedule-preview" class="hidden rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700 sm:col-span-2"></div>
+              <p id="schedule-validation-helper" class="hidden rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:col-span-2"></p>
+            </div>
+
+            <label class="block">
+              <span class="text-sm font-medium">Status</span>
+              <select name="status" class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+                <option value="stopped">Stopped</option>
+                <option value="scheduled">Scheduled</option>
+              </select>
+            </label>
+          </div>
+        </fieldset>
+
+        <div>
+          <button id="create-job-button" disabled class="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:bg-zinc-400 disabled:hover:bg-zinc-400">Create job</button>
+          <p id="create-job-helper" class="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">Lengkapi live name, channel, stream key, dan pilih video dulu.</p>
         </div>
       </form>
     </div>
@@ -156,9 +237,9 @@
                 {% if job.last_error %}<div class="mt-1 max-w-xs text-xs text-red-700">{{ job.last_error }}</div>{% endif %}
               </td>
               <td class="px-4 py-3 text-xs text-zinc-600">
-                <div>Start: {{ display_dt(job.start_at) }}</div>
-                <div>End: {{ display_dt(job.end_at) }}</div>
-                <div>Duration: {{ job.duration_minutes or "-" }}</div>
+                {% for line in job_schedule_lines(job) %}
+                  <div>{{ line }}</div>
+                {% endfor %}
               </td>
               <td class="px-4 py-3">{{ job.pid or "-" }}</td>
               <td class="px-4 py-3">
@@ -208,6 +289,16 @@
   const createJobForm = document.getElementById("create-job-form");
   const createJobHelper = document.getElementById("create-job-helper");
   const createJobButton = document.getElementById("create-job-button");
+  const scheduleModeInputs = Array.from(document.querySelectorAll("input[name='schedule_mode']"));
+  const scheduleModeHelper = document.getElementById("schedule-mode-helper");
+  const scheduleStartField = document.getElementById("schedule-start-field");
+  const scheduleEndField = document.getElementById("schedule-end-field");
+  const scheduleDurationField = document.getElementById("schedule-duration-field");
+  const scheduleStartInput = document.getElementById("schedule-start-input");
+  const scheduleEndInput = document.getElementById("schedule-end-input");
+  const scheduleDurationInput = document.getElementById("schedule-duration-input");
+  const schedulePreview = document.getElementById("schedule-preview");
+  const scheduleValidationHelper = document.getElementById("schedule-validation-helper");
   const requiredCreateJobFields = [
     document.getElementById("live-name-input"),
     document.getElementById("channel-name-input"),
@@ -215,11 +306,145 @@
     document.getElementById("video-id-input"),
   ].filter(Boolean);
 
+  function selectedScheduleMode() {
+    const selected = scheduleModeInputs.find((field) => field.checked);
+    return selected ? selected.value : "manual_now";
+  }
+
+  function parseLocalDateTime(value) {
+    if (!value) return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  function formatDuration(totalMinutes) {
+    const safeMinutes = Math.max(0, Math.floor(totalMinutes));
+    const days = Math.floor(safeMinutes / 1440);
+    const hours = Math.floor((safeMinutes % 1440) / 60);
+    const minutes = safeMinutes % 60;
+    const parts = [];
+    if (days > 0) {
+      parts.push(`${days} hari`);
+      parts.push(`${hours} jam`);
+    } else if (hours > 0) {
+      parts.push(`${hours} jam`);
+    }
+    if (minutes > 0 || parts.length === 0) {
+      parts.push(`${minutes} menit`);
+    }
+    return parts.join(" ");
+  }
+
+  function formatIndonesianDateTime(date) {
+    const months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+    const day = String(date.getDate()).padStart(2, "0");
+    const month = months[date.getMonth()];
+    const year = date.getFullYear();
+    const hour = String(date.getHours()).padStart(2, "0");
+    const minute = String(date.getMinutes()).padStart(2, "0");
+    return `${day} ${month} ${year} ${hour}:${minute}`;
+  }
+
+  function setScheduleFieldVisibility(element, input, visible, required = visible) {
+    if (!element || !input) return;
+    element.classList.toggle("hidden", !visible);
+    element.classList.toggle("block", visible);
+    input.disabled = !visible;
+    input.required = required;
+  }
+
+  function updateScheduleFields() {
+    const mode = selectedScheduleMode();
+    const showStart = mode === "start_end" || mode === "start_duration";
+    const showEnd = mode === "start_end";
+    const showDuration = mode === "manual_now" || mode === "start_duration";
+
+    setScheduleFieldVisibility(scheduleStartField, scheduleStartInput, showStart, showStart);
+    setScheduleFieldVisibility(scheduleEndField, scheduleEndInput, showEnd, showEnd);
+    setScheduleFieldVisibility(scheduleDurationField, scheduleDurationInput, showDuration, mode === "start_duration");
+
+    if (mode !== "start_end" && scheduleEndInput) {
+      scheduleEndInput.value = "";
+    }
+    if (mode === "start_end" && scheduleDurationInput) {
+      scheduleDurationInput.value = "";
+    }
+    if (mode === "manual_now" && scheduleStartInput) {
+      scheduleStartInput.value = "";
+    }
+    if (mode === "manual_now" && scheduleEndInput) {
+      scheduleEndInput.value = "";
+    }
+
+    if (scheduleModeHelper) {
+      const helperText = {
+        manual_now: "Live bisa dimulai manual dengan tombol Start.",
+        start_end: "Isi waktu mulai dan selesai. Durasi akan dihitung otomatis.",
+        start_duration: "Isi waktu mulai dan durasi. Waktu selesai akan dihitung otomatis.",
+      };
+      scheduleModeHelper.textContent = helperText[mode];
+    }
+  }
+
+  function updateSchedulePreview() {
+    const mode = selectedScheduleMode();
+    const startDate = parseLocalDateTime(scheduleStartInput && scheduleStartInput.value);
+    const endDate = parseLocalDateTime(scheduleEndInput && scheduleEndInput.value);
+    const durationValue = scheduleDurationInput && scheduleDurationInput.value ? Number(scheduleDurationInput.value) : null;
+    let previewText = "";
+    let validationText = "";
+
+    if (mode === "start_end") {
+      if (startDate && endDate) {
+        const diffMinutes = Math.floor((endDate.getTime() - startDate.getTime()) / 60000);
+        if (diffMinutes > 0) {
+          previewText = `Durasi otomatis: ${formatDuration(diffMinutes)}`;
+        } else {
+          validationText = "End datetime harus setelah start datetime.";
+        }
+      }
+    } else if (mode === "start_duration") {
+      if (durationValue !== null && durationValue <= 0) {
+        validationText = "Duration minutes harus lebih dari 0.";
+      } else if (startDate && durationValue > 0) {
+        const endDatePreview = new Date(startDate.getTime() + durationValue * 60000);
+        previewText = `Selesai otomatis: ${formatIndonesianDateTime(endDatePreview)}`;
+      }
+    }
+
+    if (schedulePreview) {
+      schedulePreview.textContent = previewText;
+      schedulePreview.classList.toggle("hidden", !previewText);
+    }
+    if (scheduleValidationHelper) {
+      scheduleValidationHelper.textContent = validationText;
+      scheduleValidationHelper.classList.toggle("hidden", !validationText);
+    }
+    return validationText === "";
+  }
+
+  function isScheduleValid() {
+    const mode = selectedScheduleMode();
+    const startDate = parseLocalDateTime(scheduleStartInput && scheduleStartInput.value);
+    const endDate = parseLocalDateTime(scheduleEndInput && scheduleEndInput.value);
+    const durationValue = scheduleDurationInput && scheduleDurationInput.value ? Number(scheduleDurationInput.value) : null;
+    if (mode === "start_end") {
+      return Boolean(startDate && endDate && endDate > startDate);
+    }
+    if (mode === "start_duration") {
+      return Boolean(startDate && durationValue > 0);
+    }
+    return true;
+  }
+
   function updateCreateJobHelper() {
-    if (!createJobHelper) return;
-    const isMissing = requiredCreateJobFields.some((field) => !field.value.trim());
-    const isDisabled = createJobButton && createJobButton.disabled;
-    createJobHelper.classList.toggle("hidden", !isMissing && !isDisabled);
+    if (!createJobHelper || !createJobButton) return;
+    updateScheduleFields();
+    updateSchedulePreview();
+    const isMissingBase = requiredCreateJobFields.some((field) => !field.value.trim());
+    const isMissing = isMissingBase || !isScheduleValid();
+    createJobButton.disabled = isMissing;
+    createJobHelper.classList.toggle("hidden", !isMissingBase);
   }
 
   requiredCreateJobFields.forEach((field) => {
@@ -231,6 +456,15 @@
   if (createJobForm) {
     createJobForm.addEventListener("submit", updateCreateJobHelper);
   }
+
+  scheduleModeInputs.forEach((field) => {
+    field.addEventListener("change", updateCreateJobHelper);
+  });
+
+  [scheduleStartInput, scheduleEndInput, scheduleDurationInput].filter(Boolean).forEach((field) => {
+    field.addEventListener("input", updateCreateJobHelper);
+    field.addEventListener("change", updateCreateJobHelper);
+  });
 
   updateCreateJobHelper();
 </script>

@@ -57,6 +57,63 @@ def display_dt(value: str | None) -> str:
         return value
 
 
+def display_dt_local(value: str | None) -> str:
+    if not value:
+        return "-"
+    try:
+        return datetime.fromisoformat(value).strftime("%d %b %Y %H:%M")
+    except ValueError:
+        return value
+
+def duration_between_minutes(start_value: datetime, end_value: datetime) -> int:
+    seconds = int((end_value - start_value).total_seconds())
+    if seconds <= 0:
+        return 0
+    return max(1, seconds // 60)
+
+def format_duration_minutes(minutes: int | str | None) -> str:
+    if minutes in (None, ""):
+        return "-"
+    try:
+        total_minutes = max(0, int(minutes))
+    except (TypeError, ValueError):
+        return "-"
+    days, remainder = divmod(total_minutes, 1440)
+    hours, mins = divmod(remainder, 60)
+    parts = []
+    if days:
+        parts.append(f"{days} hari")
+        parts.append(f"{hours} jam")
+    elif hours:
+        parts.append(f"{hours} jam")
+    if mins or not parts:
+        parts.append(f"{mins} menit")
+    return " ".join(parts)
+
+def job_schedule_lines(job: dict[str, Any]) -> list[str]:
+    start_value = parse_dt(job.get("start_at"))
+    end_value = parse_dt(job.get("end_at"))
+    duration = job.get("duration_minutes")
+    if start_value and end_value:
+        return [
+            f"Mulai: {display_dt(job.get('start_at'))}",
+            f"Selesai: {display_dt(job.get('end_at'))}",
+            f"Durasi: {format_duration_minutes(duration_between_minutes(start_value, end_value))}",
+        ]
+    if start_value:
+        lines = [f"Mulai: {display_dt(job.get('start_at'))}"]
+        if duration:
+            lines.append(f"Durasi: {int(duration)} menit")
+        return lines
+    if end_value:
+        return [
+            f"Selesai: {display_dt(job.get('end_at'))}",
+            f"Durasi: {format_duration_minutes(duration)}",
+        ]
+    if duration:
+        return [f"Durasi: {int(duration)} menit"]
+    return ["Manual start"]
+
 def safe_filename(filename: str) -> str:
     name = Path(filename).name
     name = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")
@@ -153,8 +210,47 @@ def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+def configured_ffmpeg_path() -> str:
+    configured = os.getenv("FFMPEG_PATH", "").strip().strip("\"'")
+    if configured:
+        return configured
+    return shutil.which("ffmpeg") or "ffmpeg"
+
+def ffmpeg_probe(timeout: int = 5) -> dict[str, Any]:
+    executable = configured_ffmpeg_path()
+    info: dict[str, Any] = {
+        "detected": False,
+        "path": executable,
+        "version": None,
+        "error": None,
+        "from_env": bool(os.getenv("FFMPEG_PATH", "").strip()),
+    }
+    try:
+        result = subprocess.run(
+            [executable, "-version"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except FileNotFoundError:
+        info["error"] = f"FFmpeg executable was not found: {executable}"
+        return info
+    except Exception as exc:
+        info["error"] = str(exc)
+        return info
+
+    output = (result.stdout or result.stderr or "").strip()
+    first_line = output.splitlines()[0] if output else ""
+    if result.returncode == 0:
+        info["detected"] = True
+        info["version"] = first_line or "FFmpeg detected"
+    else:
+        info["error"] = first_line or f"ffmpeg -version exited with code {result.returncode}"
+    return info
+
 def ffmpeg_path() -> str | None:
-    return shutil.which("ffmpeg")
+    info = ffmpeg_probe()
+    return info["path"] if info["detected"] else None
 
 
 def process_exists(pid: int | None) -> bool:
@@ -258,8 +354,9 @@ def start_job(conn: sqlite3.Connection, job_id: int) -> tuple[bool, str]:
         return False, "Live job was not found."
     if job["status"] == "running" and process_exists(job.get("pid")):
         return True, "Live job is already running."
-    if not ffmpeg_path():
-        message = "FFmpeg is not installed or is not available on PATH."
+    ffmpeg_info = ffmpeg_probe()
+    if not ffmpeg_info["detected"]:
+        message = f"FFmpeg is not detected using '{ffmpeg_info['path']}'. {ffmpeg_info.get('error') or ''}".strip()
         update_job_error(conn, job_id, message)
         return False, message
     video_path = Path(job["video_path"])
@@ -274,7 +371,7 @@ def start_job(conn: sqlite3.Connection, job_id: int) -> tuple[bool, str]:
 
     target = f"{YOUTUBE_RTMP_BASE}/{job['stream_key']}"
     cmd = [
-        "ffmpeg",
+        ffmpeg_info["path"],
         "-hide_banner",
         "-loglevel",
         "info",
@@ -471,6 +568,13 @@ def logout(request: Request):
     return redirect("/login")
 
 
+@app.post("/ffmpeg/test")
+def test_ffmpeg(_: None = Depends(require_admin)):
+    info = ffmpeg_probe(timeout=10)
+    if info["detected"]:
+        return redirect(f"/?{urlencode({'message': 'FFmpeg detected: ' + (info.get('version') or info['path'])})}")
+    return redirect(f"/?{urlencode({'error': 'FFmpeg test failed: ' + (info.get('error') or info['path'])})}")
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard(
     request: Request,
@@ -499,9 +603,10 @@ def dashboard(
         "stopped": db.execute("SELECT COUNT(*) FROM live_jobs WHERE status = 'stopped'").fetchone()[0],
         "error": db.execute("SELECT COUNT(*) FROM live_jobs WHERE status = 'error'").fetchone()[0],
     }
+    ffmpeg_info = ffmpeg_probe()
     warnings = []
-    if not ffmpeg_path():
-        warnings.append("FFmpeg is not installed or is not available on PATH. Start Live will not work until FFmpeg is installed.")
+    if not ffmpeg_info["detected"]:
+        warnings.append(f"FFmpeg is not detected using '{ffmpeg_info['path']}'. Start Live will not work until FFmpeg is available.")
     if ADMIN_USERNAME == "admin" and ADMIN_PASSWORD == "admin123":
         warnings.append("Default admin credentials are active. Set ADMIN_USERNAME and ADMIN_PASSWORD before using this beyond local testing.")
     for job in jobs:
@@ -517,8 +622,12 @@ def dashboard(
             "warnings": warnings,
             "message": message,
             "error": error,
+            "ffmpeg_info": ffmpeg_info,
             "latest_log": latest_any_log(db),
             "display_dt": display_dt,
+            "display_dt_local": display_dt_local,
+            "format_duration_minutes": format_duration_minutes,
+            "job_schedule_lines": job_schedule_lines,
             "mask_secret": mask_secret,
         },
     )
@@ -554,6 +663,7 @@ def create_job(
     channel_name: str = Form(...),
     video_id: int = Form(...),
     stream_key: str = Form(...),
+    schedule_mode: str = Form("manual_now"),
     start_at: str | None = Form(None),
     end_at: str | None = Form(None),
     duration_minutes: str | None = Form(None),
@@ -573,13 +683,14 @@ def create_job(
         return redirect("/?error=Selected%20video%20was%20not%20found")
     if not Path(video["path"]).exists():
         return redirect("/?error=Selected%20video%20file%20does%20not%20exist")
+    if schedule_mode not in {"manual_now", "start_end", "start_duration"}:
+        schedule_mode = "manual_now"
     try:
         start_value = parse_dt(start_at) if start_at else None
         end_value = parse_dt(end_at) if end_at else None
     except ValueError:
         return redirect("/?error=Invalid%20date%20or%20time")
-    if start_value and end_value and end_value <= start_value:
-        return redirect("/?error=End%20datetime%20must%20be%20after%20start%20datetime")
+
     duration_value = None
     if duration_minutes:
         try:
@@ -588,6 +699,27 @@ def create_job(
                 raise ValueError
         except ValueError:
             return redirect("/?error=Duration%20must%20be%20a%20positive%20number")
+
+    if schedule_mode == "manual_now":
+        start_value = None
+        end_value = None
+    elif schedule_mode == "start_end":
+        if not start_value or not end_value:
+            return redirect(f"/?{urlencode({'error': 'Start datetime dan end datetime wajib diisi.'})}")
+        if end_value <= start_value:
+            return redirect(f"/?{urlencode({'error': 'End datetime harus setelah start datetime.'})}")
+        duration_value = duration_between_minutes(start_value, end_value)
+    elif schedule_mode == "start_duration":
+        if not start_value:
+            return redirect(f"/?{urlencode({'error': 'Start datetime wajib diisi.'})}")
+        if not duration_value or duration_value <= 0:
+            return redirect(f"/?{urlencode({'error': 'Duration minutes harus lebih dari 0.'})}")
+        end_value = None
+
+    if start_value and end_value and end_value <= start_value:
+        return redirect(f"/?{urlencode({'error': 'End datetime harus setelah start datetime.'})}")
+    if start_value and end_value:
+        duration_value = duration_between_minutes(start_value, end_value)
     if start_value and status == "stopped":
         status = "scheduled"
 
