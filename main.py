@@ -1175,6 +1175,104 @@ def channel_matrix(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             channel[key] = int(channel.get(key) or 0)
     return rows
 
+def channel_filters_where(filters: dict[str, str] | None) -> tuple[list[str], list[Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    filters = filters or {}
+    search = (filters.get("search") or "").strip()
+    status = (filters.get("status") or "").strip()
+    niche = (filters.get("niche") or "").strip()
+    if search:
+        clauses.append(
+            """
+            (
+                channels.name LIKE ?
+                OR COALESCE(channels.handle, '') LIKE ?
+                OR COALESCE(channels.niche, '') LIKE ?
+                OR COALESCE(channels.notes, '') LIKE ?
+            )
+            """
+        )
+        pattern = f"%{search}%"
+        params.extend([pattern, pattern, pattern, pattern])
+    if status == "active":
+        clauses.append("channels.is_active = 1")
+    elif status == "inactive":
+        clauses.append("channels.is_active = 0")
+    if niche:
+        clauses.append("COALESCE(channels.niche, '') = ?")
+        params.append(niche)
+    return clauses, params
+
+def channel_order_clause(sort: str | None) -> str:
+    return {
+        "oldest": "channels.created_at ASC, channels.id ASC",
+        "name_az": "channels.name COLLATE NOCASE ASC, channels.id ASC",
+        "status": "channels.is_active DESC, channels.name COLLATE NOCASE ASC",
+        "total_live_jobs": "total_live_jobs DESC, channels.name COLLATE NOCASE ASC",
+    }.get(sort or "newest", "channels.created_at DESC, channels.id DESC")
+
+def channel_rows(conn: sqlite3.Connection, filters: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    clauses, params = channel_filters_where(filters)
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    order_sql = channel_order_clause((filters or {}).get("sort"))
+    rows = [
+        dict(row)
+        for row in conn.execute(
+            f"""
+            SELECT channels.*,
+                   COUNT(DISTINCT live_jobs.id) AS total_live_jobs,
+                   COUNT(DISTINCT CASE WHEN live_jobs.status = 'running' THEN live_jobs.id END) AS running_count,
+                   COUNT(DISTINCT CASE WHEN live_jobs.status IN ('queued', 'scheduled') THEN live_jobs.id END) AS scheduled_queued_count,
+                   COUNT(DISTINCT CASE WHEN live_jobs.status = 'error' THEN live_jobs.id END) AS error_count
+            FROM channels
+            LEFT JOIN live_jobs ON live_jobs.channel_id = channels.id
+            {where_sql}
+            GROUP BY channels.id
+            ORDER BY {order_sql}
+            """,
+            params,
+        ).fetchall()
+    ]
+    for channel in rows:
+        channel["total_live_jobs"] = int(channel.get("total_live_jobs") or 0)
+        channel["running_count"] = int(channel.get("running_count") or 0)
+        channel["scheduled_queued_count"] = int(channel.get("scheduled_queued_count") or 0)
+        channel["error_count"] = int(channel.get("error_count") or 0)
+        channel["has_default_stream_key"] = bool(channel.get("default_stream_key"))
+    return rows
+
+def channel_summary(conn: sqlite3.Connection) -> dict[str, int]:
+    return {
+        "total": conn.execute("SELECT COUNT(*) FROM channels").fetchone()[0],
+        "active": conn.execute("SELECT COUNT(*) FROM channels WHERE is_active = 1").fetchone()[0],
+        "inactive": conn.execute("SELECT COUNT(*) FROM channels WHERE is_active = 0").fetchone()[0],
+        "with_stream_key": conn.execute(
+            "SELECT COUNT(*) FROM channels WHERE COALESCE(default_stream_key, '') != ''"
+        ).fetchone()[0],
+        "with_errors": conn.execute(
+            """
+            SELECT COUNT(DISTINCT channels.id)
+            FROM channels
+            JOIN live_jobs ON live_jobs.channel_id = channels.id
+            WHERE live_jobs.status = 'error'
+            """
+        ).fetchone()[0],
+    }
+
+def channel_niches(conn: sqlite3.Connection) -> list[str]:
+    return [
+        row["niche"]
+        for row in conn.execute(
+            """
+            SELECT DISTINCT niche
+            FROM channels
+            WHERE COALESCE(niche, '') != ''
+            ORDER BY niche COLLATE NOCASE
+            """
+        ).fetchall()
+    ]
+
 def get_stop_at(job: dict[str, Any]) -> datetime | None:
     expected_end_at = parse_dt(job.get("expected_end_at"))
     if expected_end_at:
@@ -1514,7 +1612,7 @@ def duplicate_job_as_new(conn: sqlite3.Connection, job_id: int) -> tuple[bool, s
     conn.commit()
     return True, f"History job duplicated as Live Job #{db_cursor.lastrowid}."
 
-def fetch_videos_with_usage(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+def fetch_videos_with_usage(conn: sqlite3.Connection, filters: dict[str, str] | None = None) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
         SELECT videos.*,
@@ -1525,6 +1623,9 @@ def fetch_videos_with_usage(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         ORDER BY videos.uploaded_at DESC
         """
     ).fetchall()
+    filters = filters or {}
+    search = (filters.get("search") or "").strip().lower()
+    usage = (filters.get("usage") or "").strip()
     videos = []
     for row in rows:
         video = dict(row)
@@ -1533,6 +1634,13 @@ def fetch_videos_with_usage(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         video["file_size_bytes"] = path.stat().st_size if path.exists() else None
         video["file_size"] = format_bytes(video["file_size_bytes"])
         video["is_used"] = int(video.get("live_job_count") or 0) > 0
+        haystack = f"{video.get('original_name') or ''} {video.get('filename') or ''}".lower()
+        if search and search not in haystack:
+            continue
+        if usage == "used" and not video["is_used"]:
+            continue
+        if usage == "unused" and video["is_used"]:
+            continue
         videos.append(video)
     return videos
 
@@ -1737,6 +1845,24 @@ def update_channel(
     )
     db.commit()
     return redirect(f"/channels?{urlencode({'message': 'Channel updated.'})}")
+
+@app.post("/channels/{channel_id}/status")
+def update_channel_status(
+    channel_id: int,
+    is_active: int = Form(...),
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    channel = db.execute("SELECT id FROM channels WHERE id = ?", (channel_id,)).fetchone()
+    if not channel:
+        return redirect(f"/channels?{urlencode({'error': 'Channel was not found.'})}")
+    db.execute(
+        "UPDATE channels SET is_active = ?, updated_at = ? WHERE id = ?",
+        (1 if is_active else 0, dt_to_str(local_now()), channel_id),
+    )
+    db.commit()
+    message = "Channel activated." if is_active else "Channel deactivated."
+    return redirect(f"/channels?{urlencode({'message': message})}")
 
 @app.post("/channels/{channel_id}/delete")
 def delete_channel(
@@ -2106,23 +2232,13 @@ def admin_context(
     error: str | None = None,
     job_filters: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    videos = fetch_videos_with_usage(db)
+    video_filters = job_filters if active_tab == "videos" else None
+    videos = fetch_videos_with_usage(db, video_filters)
     jobs = annotate_job_file_state(fetch_live_jobs(db, job_filters if active_tab == "live_jobs" else None))
     history_jobs = annotate_job_file_state(fetch_history_jobs(db, job_filters if active_tab == "history" else None))
     scheduler_jobs = annotate_job_file_state(fetch_scheduler_jobs(db, job_filters if active_tab == "scheduler" else None))
-    channels = [
-        dict(row)
-        for row in db.execute(
-            """
-            SELECT channels.*,
-                   COUNT(live_jobs.id) AS live_job_count
-            FROM channels
-            LEFT JOIN live_jobs ON live_jobs.channel_id = channels.id
-            GROUP BY channels.id
-            ORDER BY channels.is_active DESC, channels.name COLLATE NOCASE
-            """
-        ).fetchall()
-    ]
+    channel_filters = job_filters if active_tab == "channels" else None
+    channels = channel_rows(db, channel_filters if active_tab == "channels" else {"sort": "status"})
     active_channels = [
         dict(row)
         for row in db.execute(
@@ -2189,7 +2305,7 @@ def admin_context(
     history_totals = history_summary(history_jobs)
     dashboard_history = dashboard_history_summary(db)
     live_monitor_jobs = dashboard_live_monitor_jobs(db)
-    channel_rows = channel_matrix(db)
+    channel_matrix_rows = channel_matrix(db)
     system_info = system_monitor(db)
     warnings.extend(system_info["warnings"])
     return {
@@ -2198,6 +2314,7 @@ def admin_context(
         "active_tab": active_tab,
         "page_title": page_title,
         "videos": videos,
+        "video_filters": video_filters or {},
         "jobs": jobs,
         "history_jobs": history_jobs,
         "job_filters": job_filters or {},
@@ -2209,9 +2326,12 @@ def admin_context(
         "history_totals": history_totals,
         "dashboard_history": dashboard_history,
         "live_monitor_jobs": live_monitor_jobs,
-        "channel_matrix": channel_rows,
+        "channel_matrix": channel_matrix_rows,
         "system_info": system_info,
         "channels": channels,
+        "channel_filters": channel_filters or {},
+        "channel_summary": channel_summary(db),
+        "channel_niches": channel_niches(db),
         "active_channels": active_channels,
         "audio_assets": audio_assets,
         "audio_playlists": audio_playlists,
@@ -2290,8 +2410,18 @@ def channels_page(
     _: None = Depends(require_admin),
     message: str | None = None,
     error: str | None = None,
+    search: str = "",
+    status: str = "",
+    niche: str = "",
+    sort: str = "newest",
 ):
-    return render_admin("channels.html", request, db, "channels", "Channels", message, error)
+    channel_filters = {
+        "search": search,
+        "status": status,
+        "niche": niche,
+        "sort": sort,
+    }
+    return render_admin("channels.html", request, db, "channels", "Channels", message, error, channel_filters)
 
 @app.get("/videos", response_class=HTMLResponse)
 def videos_page(
@@ -2300,8 +2430,14 @@ def videos_page(
     _: None = Depends(require_admin),
     message: str | None = None,
     error: str | None = None,
+    search: str = "",
+    usage: str = "",
 ):
-    return render_admin("videos.html", request, db, "videos", "Video Library", message, error)
+    video_filters = {
+        "search": search,
+        "usage": usage,
+    }
+    return render_admin("videos.html", request, db, "videos", "Video Library", message, error, video_filters)
 
 @app.get("/audio", response_class=HTMLResponse)
 def audio_page(
@@ -2620,7 +2756,11 @@ def upload_video(
     original_name = file.filename or ""
     if not original_name.lower().endswith(".mp4"):
         return redirect("/videos?error=Only%20MP4%20uploads%20are%20allowed")
-    filename = f"{local_now().strftime('%Y%m%d%H%M%S')}_{safe_filename(original_name)}"
+    duplicate_count = db.execute(
+        "SELECT COUNT(*) FROM videos WHERE lower(original_name) = lower(?)",
+        (original_name,),
+    ).fetchone()[0]
+    filename = f"{local_now().strftime('%Y%m%d%H%M%S%f')}_{safe_filename(original_name)}"
     target = VIDEO_DIR / filename
     with target.open("wb") as output:
         shutil.copyfileobj(file.file, output)
@@ -2630,8 +2770,26 @@ def upload_video(
         (filename, original_name, str(target), now),
     )
     db.commit()
+    if duplicate_count:
+        return redirect(
+            f"/videos?{urlencode({'message': 'Peringatan: nama file ini duplikat. File tetap disimpan sebagai salinan baru.'})}"
+        )
     return redirect("/videos?message=Video%20berhasil%20di-upload%20dan%20siap%20dipakai.")
 
+
+@app.get("/videos/{video_id}/preview")
+def preview_video(
+    video_id: int,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    video = db.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
+    if not video:
+        return Response(status_code=404)
+    video_path = Path(video["path"])
+    if not path_is_inside(video_path, VIDEO_DIR) or not video_path.exists():
+        return Response(status_code=404)
+    return FileResponse(video_path, media_type="video/mp4", filename=video["original_name"])
 
 @app.post("/videos/{video_id}/delete")
 def delete_video(
@@ -2645,7 +2803,7 @@ def delete_video(
     usage_count = db.execute("SELECT COUNT(*) FROM live_jobs WHERE video_id = ?", (video_id,)).fetchone()[0]
     if usage_count:
         return redirect(
-            f"/videos?{urlencode({'error': f'Video tidak bisa dihapus karena masih dipakai oleh Live Job ({usage_count} job).'})}"
+            f"/videos?{urlencode({'error': 'Video masih dipakai Live Job dan belum bisa dihapus.'})}"
         )
 
     video_path = Path(video["path"])

@@ -1,87 +1,240 @@
 {% extends "admin.html" %}
 {% block title %}Channels{% endblock %}
 {% block admin_content %}
-<section class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-  <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-    <div>
-      <h3 class="text-base font-semibold">Channel Management</h3>
-      <p class="mt-1 text-sm text-zinc-400">Add, edit, activate, deactivate, or delete channels used by Live Jobs.</p>
+<section class="space-y-6">
+  <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+    <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+      <p class="text-sm text-zinc-400">Total channels</p>
+      <p class="mt-2 text-3xl font-semibold">{{ channel_summary.total }}</p>
     </div>
-    <div class="grid grid-cols-3 gap-2 text-center text-sm">
-      <div class="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
-        <p class="text-xs text-zinc-500">Total</p>
-        <p class="font-semibold">{{ channels|length }}</p>
-      </div>
-      <div class="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
-        <p class="text-xs text-zinc-500">Active</p>
-        <p class="font-semibold text-emerald-400">{{ active_channels|length }}</p>
-      </div>
-      <div class="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
-        <p class="text-xs text-zinc-500">Inactive</p>
-        <p class="font-semibold text-zinc-300">{{ (channels|length) - (active_channels|length) }}</p>
-      </div>
+    <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+      <p class="text-sm text-zinc-400">Active channels</p>
+      <p class="mt-2 text-3xl font-semibold text-emerald-400">{{ channel_summary.active }}</p>
+    </div>
+    <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+      <p class="text-sm text-zinc-400">Inactive channels</p>
+      <p class="mt-2 text-3xl font-semibold text-zinc-300">{{ channel_summary.inactive }}</p>
+    </div>
+    <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+      <p class="text-sm text-zinc-400">With stream key</p>
+      <p class="mt-2 text-3xl font-semibold text-sky-300">{{ channel_summary.with_stream_key }}</p>
+    </div>
+    <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+      <p class="text-sm text-zinc-400">Channels with errors</p>
+      <p class="mt-2 text-3xl font-semibold text-red-300">{{ channel_summary.with_errors }}</p>
     </div>
   </div>
-</section>
 
-<section class="mt-6 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-  <h3 class="text-base font-semibold">Add Channel</h3>
-  <p class="mt-1 text-sm text-zinc-400">Active channels appear in the Live Jobs channel dropdown. Default stream keys are optional.</p>
-  <form method="post" action="/channels" class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-    <label class="block"><span class="text-xs font-medium text-zinc-500">Name</span><input name="name" required placeholder="Channel name" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"></label>
-    <label class="block"><span class="text-xs font-medium text-zinc-500">Handle</span><input name="handle" placeholder="@handle" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"></label>
-    <label class="block"><span class="text-xs font-medium text-zinc-500">Niche</span><input name="niche" placeholder="Niche" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"></label>
-    <div class="block">
-      <span class="text-xs font-medium text-zinc-500">Default stream key</span>
-      <span class="mt-1 flex rounded-md border border-zinc-700 bg-zinc-950 focus-within:border-emerald-500">
-        <input id="default-stream-key-new" name="default_stream_key" type="password" autocomplete="off" placeholder="Optional" class="min-w-0 flex-1 rounded-l-md bg-transparent px-3 py-2 text-sm outline-none">
-        <button type="button" data-secret-toggle data-target="default-stream-key-new" aria-label="Show default stream key" class="flex w-10 items-center justify-center rounded-r-md border-l border-zinc-700 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100">
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-        </button>
-      </span>
-      <span class="mt-1 block text-xs text-zinc-500">Klik ikon mata untuk melihat atau menyembunyikan stream key.</span>
+  <section class="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h3 class="text-base font-semibold">Add Channel</h3>
+        <p class="mt-1 text-sm text-zinc-400">Active channels appear in the Live Jobs channel dropdown. Default stream keys are optional.</p>
+      </div>
     </div>
-    <label class="block"><span class="text-xs font-medium text-zinc-500">Notes</span><input name="notes" placeholder="Notes" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"></label>
-    <div class="flex items-center gap-3">
-      <label class="flex items-center gap-2 text-sm"><input name="is_active" type="checkbox" checked>Active</label>
-      <button class="ml-auto rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400">Add</button>
+    <form method="post" action="/channels" class="mt-5 grid gap-4 lg:grid-cols-2">
+      <label class="block">
+        <span class="text-sm font-medium text-zinc-300">Channel name</span>
+        <input name="name" required placeholder="Sleep Lofi 01" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+        <span class="mt-1 block text-xs text-zinc-500">Untuk sekarang nama channel diisi manual. Sinkron otomatis dari YouTube akan ditambahkan nanti lewat YouTube API.</span>
+      </label>
+      <label class="block">
+        <span class="text-sm font-medium text-zinc-300">Handle</span>
+        <input name="handle" placeholder="@sleeplofi01" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+      </label>
+      <label class="block">
+        <span class="text-sm font-medium text-zinc-300">Niche</span>
+        <input name="niche" placeholder="sleep, study, rain, meditation" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+      </label>
+      <div class="block">
+        <span class="text-sm font-medium text-zinc-300">Default stream key</span>
+        <span class="mt-1 flex rounded-md border border-zinc-700 bg-zinc-950 focus-within:border-emerald-500">
+          <input id="default-stream-key-new" name="default_stream_key" type="password" autocomplete="off" placeholder="Optional" class="min-w-0 flex-1 rounded-l-md bg-transparent px-3 py-2 text-sm outline-none">
+          <button type="button" data-secret-toggle data-target="default-stream-key-new" aria-label="Show default stream key" class="flex w-11 shrink-0 items-center justify-center rounded-r-md border-l border-zinc-700 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+          </button>
+        </span>
+        <span class="mt-1 block text-xs text-zinc-500">Opsional. Jika diisi, stream key akan otomatis terisi saat membuat Live Job untuk channel ini.</span>
+      </div>
+      <label class="block lg:col-span-2">
+        <span class="text-sm font-medium text-zinc-300">Notes</span>
+        <textarea name="notes" rows="3" placeholder="optional notes" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"></textarea>
+      </label>
+      <div class="flex flex-col gap-3 border-t border-zinc-800 pt-4 sm:flex-row sm:items-center sm:justify-between lg:col-span-2">
+        <label class="flex items-center gap-2 text-sm text-zinc-300">
+          <input name="is_active" type="checkbox" checked class="rounded border-zinc-700 bg-zinc-950 text-emerald-500 focus:ring-emerald-500">
+          Active
+        </label>
+        <button class="rounded-md bg-emerald-500 px-5 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400">Add Channel</button>
+      </div>
+    </form>
+  </section>
+
+  <form method="get" action="/channels" class="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+    <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <h3 class="text-base font-semibold">Channel Filters</h3>
+        <p class="mt-1 text-sm text-zinc-400">Cari channel manual, niche, status, atau catatan lokal.</p>
+      </div>
+      <div class="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-300">
+        Showing <span class="font-semibold text-zinc-100">{{ channels|length }}</span> channels
+      </div>
+    </div>
+    <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <label class="block xl:col-span-2">
+        <span class="text-xs font-medium text-zinc-500">Search</span>
+        <input name="search" value="{{ channel_filters.search or '' }}" placeholder="Name, handle, niche, notes" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+      </label>
+      <label class="block">
+        <span class="text-xs font-medium text-zinc-500">Status</span>
+        <select name="status" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+          <option value="" {% if not channel_filters.status %}selected{% endif %}>All</option>
+          <option value="active" {% if channel_filters.status == 'active' %}selected{% endif %}>Active</option>
+          <option value="inactive" {% if channel_filters.status == 'inactive' %}selected{% endif %}>Inactive</option>
+        </select>
+      </label>
+      <label class="block">
+        <span class="text-xs font-medium text-zinc-500">Niche</span>
+        <select name="niche" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+          <option value="">All niches</option>
+          {% for niche in channel_niches %}
+            <option value="{{ niche }}" {% if channel_filters.niche == niche %}selected{% endif %}>{{ niche }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="block">
+        <span class="text-xs font-medium text-zinc-500">Sort</span>
+        <select name="sort" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+          <option value="newest" {% if (channel_filters.sort or 'newest') == 'newest' %}selected{% endif %}>Newest</option>
+          <option value="oldest" {% if channel_filters.sort == 'oldest' %}selected{% endif %}>Oldest</option>
+          <option value="name_az" {% if channel_filters.sort == 'name_az' %}selected{% endif %}>Name A-Z</option>
+          <option value="status" {% if channel_filters.sort == 'status' %}selected{% endif %}>Status</option>
+          <option value="total_live_jobs" {% if channel_filters.sort == 'total_live_jobs' %}selected{% endif %}>Total live jobs</option>
+        </select>
+      </label>
+    </div>
+    <div class="mt-4 flex flex-wrap justify-end gap-2">
+      <a href="/channels" class="rounded-md border border-zinc-700 px-4 py-2 text-sm font-medium hover:bg-zinc-800">Clear</a>
+      <button class="rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400">Apply filters</button>
     </div>
   </form>
-</section>
 
-<section class="mt-6 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-  <h3 class="text-base font-semibold">Channel List</h3>
-  <p class="mt-1 text-sm text-zinc-400">Deleting a channel that is already used by live jobs will mark it inactive instead.</p>
-  <div class="mt-4 space-y-3">
-    {% for channel in channels %}
-      <div class="rounded-md border border-zinc-800 bg-zinc-950 p-3">
-        <form method="post" action="/channels/{{ channel.id }}/update" class="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-          <input name="name" value="{{ channel.name }}" required class="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm">
-          <input name="handle" value="{{ channel.handle or '' }}" class="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm">
-          <input name="niche" value="{{ channel.niche or '' }}" class="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm">
-          <div>
-            <div class="flex rounded-md border border-zinc-700 bg-zinc-900 focus-within:border-emerald-500">
-              <input id="default-stream-key-{{ channel.id }}" name="default_stream_key" value="{{ channel.default_stream_key or '' }}" type="password" autocomplete="off" class="min-w-0 flex-1 rounded-l-md bg-transparent px-3 py-2 text-sm outline-none">
-              <button type="button" data-secret-toggle data-target="default-stream-key-{{ channel.id }}" aria-label="Show default stream key" class="flex w-10 items-center justify-center rounded-r-md border-l border-zinc-700 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100">
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-              </button>
-            </div>
-          </div>
-          <input name="notes" value="{{ channel.notes or '' }}" class="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm">
-          <div class="flex items-center gap-2">
-            <label class="flex items-center gap-2 text-sm"><input name="is_active" type="checkbox" {% if channel.is_active %}checked{% endif %}>Active</label>
-            <span class="rounded-full px-2 py-1 text-xs {% if channel.is_active %}bg-emerald-950 text-emerald-300{% else %}bg-zinc-800 text-zinc-400{% endif %}">{% if channel.is_active %}active{% else %}inactive{% endif %}</span>
-            <button class="ml-auto rounded-md border border-zinc-700 px-3 py-2 text-xs hover:bg-zinc-800">Save</button>
-          </div>
-        </form>
-        <form method="post" action="/channels/{{ channel.id }}/delete" class="mt-2 flex justify-end">
-          <button class="rounded-md border border-red-900 px-3 py-2 text-xs text-red-300 hover:bg-red-950">{% if channel.live_job_count %}Set inactive{% else %}Delete{% endif %}</button>
-        </form>
+  <section class="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h3 class="text-base font-semibold">Channel List</h3>
+        <p class="mt-1 text-sm text-zinc-400">Channels stay readable by default. Edit opens only for the selected row.</p>
       </div>
-    {% else %}
-      <p class="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-4 text-sm text-zinc-500">No channels yet.</p>
-    {% endfor %}
-  </div>
+    </div>
+    <div class="mt-4 overflow-x-auto">
+      <table class="min-w-[1180px] w-full divide-y divide-zinc-800 text-sm">
+        <thead class="text-left text-xs uppercase tracking-wide text-zinc-500">
+          <tr>
+            <th class="w-56 px-3 py-3">Channel name</th>
+            <th class="w-40 px-3 py-3">Handle</th>
+            <th class="w-44 px-3 py-3">Niche</th>
+            <th class="w-28 px-3 py-3">Status</th>
+            <th class="w-40 px-3 py-3">Default stream key</th>
+            <th class="w-28 px-3 py-3 text-right">Total live jobs</th>
+            <th class="w-24 px-3 py-3 text-right">Running</th>
+            <th class="w-32 px-3 py-3 text-right">Scheduled/Queued</th>
+            <th class="w-24 px-3 py-3 text-right">Error</th>
+            <th class="w-64 px-3 py-3">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-zinc-800">
+          {% for channel in channels %}
+            <tr class="align-middle">
+              <td class="px-3 py-3">
+                <div class="font-medium text-zinc-100">{{ channel.name }}</div>
+                {% if channel.notes %}
+                  <div class="mt-1 line-clamp-2 text-xs text-zinc-500">{{ channel.notes }}</div>
+                {% endif %}
+              </td>
+              <td class="px-3 py-3 text-zinc-300">{{ channel.handle or "-" }}</td>
+              <td class="px-3 py-3 text-zinc-300">{{ channel.niche or "-" }}</td>
+              <td class="px-3 py-3">
+                <span class="rounded-full px-2 py-1 text-xs font-medium {% if channel.is_active %}bg-emerald-950 text-emerald-300{% else %}bg-zinc-800 text-zinc-400{% endif %}">{% if channel.is_active %}active{% else %}inactive{% endif %}</span>
+              </td>
+              <td class="px-3 py-3">
+                {% if channel.has_default_stream_key %}
+                  <span class="rounded-full bg-sky-950 px-2 py-1 text-xs font-medium text-sky-300">configured</span>
+                {% else %}
+                  <span class="text-zinc-500">not set</span>
+                {% endif %}
+              </td>
+              <td class="px-3 py-3 text-right font-medium">{{ channel.total_live_jobs }}</td>
+              <td class="px-3 py-3 text-right text-emerald-300">{{ channel.running_count }}</td>
+              <td class="px-3 py-3 text-right text-sky-300">{{ channel.scheduled_queued_count }}</td>
+              <td class="px-3 py-3 text-right text-red-300">{{ channel.error_count }}</td>
+              <td class="px-3 py-3">
+                <div class="flex flex-wrap gap-2">
+                  <a href="/live-jobs?channel_id={{ channel.id }}" class="rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs font-medium hover:bg-zinc-800">View</a>
+                  <button type="button" data-edit-channel="{{ channel.id }}" class="rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs font-medium hover:bg-zinc-800">Edit</button>
+                  <form method="post" action="/channels/{{ channel.id }}/status">
+                    <input type="hidden" name="is_active" value="{% if channel.is_active %}0{% else %}1{% endif %}">
+                    <button class="rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs font-medium hover:bg-zinc-800">{% if channel.is_active %}Deactivate{% else %}Activate{% endif %}</button>
+                  </form>
+                  <form method="post" action="/channels/{{ channel.id }}/delete" onsubmit="return confirm('{% if channel.total_live_jobs %}Channel ini sudah dipakai live job. Channel akan dibuat inactive, bukan dihapus. Lanjut?{% else %}Delete channel ini?{% endif %}');">
+                    <button class="rounded-md border border-red-900 px-2.5 py-1.5 text-xs font-medium text-red-300 hover:bg-red-950">{% if channel.total_live_jobs %}Set inactive{% else %}Delete{% endif %}</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+            <tr id="edit-channel-{{ channel.id }}" class="hidden bg-zinc-950/60">
+              <td colspan="10" class="px-3 py-4">
+                <form method="post" action="/channels/{{ channel.id }}/update" class="grid gap-4 lg:grid-cols-2">
+                  <label class="block">
+                    <span class="text-xs font-medium text-zinc-500">Channel name</span>
+                    <input name="name" value="{{ channel.name }}" required placeholder="Sleep Lofi 01" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+                    <span class="mt-1 block text-xs text-zinc-500">Nama masih manual sampai integrasi YouTube API ditambahkan nanti.</span>
+                  </label>
+                  <label class="block">
+                    <span class="text-xs font-medium text-zinc-500">Handle</span>
+                    <input name="handle" value="{{ channel.handle or '' }}" placeholder="@sleeplofi01" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+                  </label>
+                  <label class="block">
+                    <span class="text-xs font-medium text-zinc-500">Niche</span>
+                    <input name="niche" value="{{ channel.niche or '' }}" placeholder="sleep, study, rain, meditation" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+                  </label>
+                  <div class="block">
+                    <span class="text-xs font-medium text-zinc-500">Default stream key</span>
+                    <span class="mt-1 flex rounded-md border border-zinc-700 bg-zinc-950 focus-within:border-emerald-500">
+                      <input id="default-stream-key-{{ channel.id }}" name="default_stream_key" value="{{ channel.default_stream_key or '' }}" type="password" autocomplete="off" placeholder="Optional" class="min-w-0 flex-1 rounded-l-md bg-transparent px-3 py-2 text-sm outline-none">
+                      <button type="button" data-secret-toggle data-target="default-stream-key-{{ channel.id }}" aria-label="Show default stream key" class="flex w-11 shrink-0 items-center justify-center rounded-r-md border-l border-zinc-700 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                      </button>
+                    </span>
+                    <span class="mt-1 block text-xs text-zinc-500">Opsional. Jika diisi, Live Job baru untuk channel ini bisa auto-fill stream key.</span>
+                  </div>
+                  <label class="block lg:col-span-2">
+                    <span class="text-xs font-medium text-zinc-500">Notes</span>
+                    <textarea name="notes" rows="3" placeholder="optional notes" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">{{ channel.notes or '' }}</textarea>
+                  </label>
+                  <div class="flex flex-col gap-3 border-t border-zinc-800 pt-4 sm:flex-row sm:items-center sm:justify-between lg:col-span-2">
+                    <label class="flex items-center gap-2 text-sm text-zinc-300">
+                      <input name="is_active" type="checkbox" {% if channel.is_active %}checked{% endif %} class="rounded border-zinc-700 bg-zinc-950 text-emerald-500 focus:ring-emerald-500">
+                      Active
+                    </label>
+                    <div class="flex flex-wrap gap-2">
+                      <button type="button" data-cancel-edit="{{ channel.id }}" class="rounded-md border border-zinc-700 px-4 py-2 text-sm font-medium hover:bg-zinc-800">Cancel</button>
+                      <button class="rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400">Save changes</button>
+                    </div>
+                  </div>
+                </form>
+              </td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="10" class="px-3 py-8 text-center text-zinc-500">
+                No channels found. Add a channel or clear filters.
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
 </section>
 <script>
   document.querySelectorAll("[data-secret-toggle]").forEach((button) => {
@@ -92,6 +245,19 @@
       target.type = isVisible ? "password" : "text";
       button.setAttribute("aria-label", isVisible ? "Show default stream key" : "Hide default stream key");
       button.classList.toggle("text-emerald-300", !isVisible);
+    });
+  });
+  document.querySelectorAll("[data-edit-channel]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const target = document.getElementById(`edit-channel-${button.dataset.editChannel}`);
+      if (!target) return;
+      target.classList.toggle("hidden");
+    });
+  });
+  document.querySelectorAll("[data-cancel-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const target = document.getElementById(`edit-channel-${button.dataset.cancelEdit}`);
+      if (target) target.classList.add("hidden");
     });
   });
 </script>

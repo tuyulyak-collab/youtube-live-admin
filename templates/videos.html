@@ -1,83 +1,223 @@
 {% extends "admin.html" %}
 {% block title %}Video Library{% endblock %}
 {% block admin_content %}
-<section class="grid gap-6 lg:grid-cols-3">
+<section class="space-y-5">
   <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-    <h3 class="text-base font-semibold">Upload MP4</h3>
-    <p class="mt-1 text-sm text-zinc-400">File baru bisa dipakai di Live Job setelah berhasil di-upload.</p>
-    <form method="post" action="/videos" enctype="multipart/form-data" class="mt-4 space-y-4">
-      <label class="block">
-        <span class="flex items-center gap-2 text-sm font-semibold"><span class="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-xs text-zinc-950">1</span>Langkah 1: Pilih file video</span>
-        <input id="upload-video-file" name="file" type="file" accept="video/mp4,.mp4" required class="mt-3 block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-emerald-500 file:px-3 file:py-2 file:text-zinc-950">
-      </label>
-      <p id="upload-pending-warning" class="hidden rounded-md border border-amber-800 bg-amber-950 px-3 py-2 text-xs text-amber-200">Video sudah dipilih, tapi belum di-upload. Klik Upload Video agar muncul di daftar Live Job.</p>
-      <div>
-        <p class="mb-2 flex items-center gap-2 text-sm font-semibold"><span class="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-xs text-zinc-950">2</span>Langkah 2: Upload video</p>
-        <button class="w-full rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400">Upload Video</button>
+    <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+      <div class="min-w-0">
+        <h3 class="text-base font-semibold">Upload MP4</h3>
+        <p class="mt-1 text-sm text-zinc-400">File baru bisa dipakai di Live Job setelah berhasil di-upload.</p>
       </div>
-    </form>
+      <form id="upload-video-form" method="post" action="/videos" enctype="multipart/form-data" class="flex w-full flex-col gap-3 sm:flex-row lg:max-w-3xl">
+        <label class="min-w-0 flex-1">
+          <span class="sr-only">Pilih file video</span>
+          <input id="upload-video-file" name="file" type="file" accept="video/mp4,.mp4" required class="block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-emerald-500 file:px-3 file:py-2 file:text-zinc-950">
+        </label>
+        <button class="rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400 sm:w-36">Upload Video</button>
+      </form>
+    </div>
+    <p id="upload-pending-warning" class="mt-3 hidden rounded-md border border-amber-800 bg-amber-950 px-3 py-2 text-xs text-amber-200">Video sudah dipilih, tapi belum di-upload. Klik Upload Video agar muncul di daftar Live Job.</p>
+    <p id="upload-duplicate-warning" class="mt-3 hidden rounded-md border border-amber-800 bg-amber-950 px-3 py-2 text-xs text-amber-200">Video dengan nama file ini sudah pernah di-upload.</p>
   </div>
 
-  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4 lg:col-span-2">
-    <h3 class="text-base font-semibold">Uploaded Videos</h3>
-    <p class="mt-1 text-sm text-zinc-400">Video yang masih dipakai Live Job tidak bisa dihapus.</p>
-    <div class="mt-4 overflow-x-auto rounded-lg border border-zinc-800">
-      <table class="min-w-[860px] divide-y divide-zinc-800 text-sm">
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <div>
+        <h3 class="text-base font-semibold">Uploaded Videos</h3>
+        <p class="mt-1 text-sm text-zinc-400">Video yang masih dipakai Live Job tidak bisa dihapus.</p>
+      </div>
+      <form method="get" action="/videos" class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px_auto] lg:w-[640px]">
+        <label>
+          <span class="text-xs font-medium text-zinc-500">Search filename</span>
+          <input name="search" value="{{ video_filters.search or '' }}" placeholder="Search videos" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+        </label>
+        <label>
+          <span class="text-xs font-medium text-zinc-500">Usage</span>
+          <select name="usage" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+            <option value="" {% if not video_filters.usage %}selected{% endif %}>All</option>
+            <option value="used" {% if video_filters.usage == 'used' %}selected{% endif %}>Used</option>
+            <option value="unused" {% if video_filters.usage == 'unused' %}selected{% endif %}>Unused</option>
+          </select>
+        </label>
+        <div class="flex items-end gap-2">
+          <button class="rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400">Filter</button>
+          {% if video_filters.search or video_filters.usage %}
+            <a href="/videos" class="rounded-md border border-zinc-700 px-3 py-2 text-sm hover:bg-zinc-800">Reset</a>
+          {% endif %}
+        </div>
+      </form>
+    </div>
+
+    <div class="mt-4 overflow-hidden rounded-lg border border-zinc-800">
+      <table class="w-full table-fixed divide-y divide-zinc-800 text-sm">
         <thead class="bg-zinc-950 text-left text-xs uppercase tracking-wide text-zinc-500">
           <tr>
             <th class="px-3 py-3">Filename</th>
-            <th class="px-3 py-3">File size</th>
-            <th class="px-3 py-3">Uploaded</th>
-            <th class="px-3 py-3">Usage</th>
-            <th class="px-3 py-3">Stored name</th>
-            <th class="px-3 py-3 text-right">Actions</th>
+            <th class="hidden w-40 px-3 py-3 sm:table-cell">Uploaded</th>
+            <th class="w-32 px-3 py-3 text-right sm:w-44">Actions</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-zinc-800">
           {% for video in videos %}
-            <tr class="align-top hover:bg-zinc-950/60">
-              <td class="px-3 py-3 font-medium">
-                <div class="break-words">{{ video.original_name }}</div>
-                {% if not video.file_exists %}
-                  <div class="mt-1 rounded-md border border-red-900 bg-red-950 px-2 py-1 text-xs font-normal text-red-200">File video tidak ditemukan.</div>
-                {% endif %}
-              </td>
-              <td class="px-3 py-3 text-zinc-400">{{ video.file_size }}</td>
-              <td class="px-3 py-3 text-zinc-400">{{ display_dt(video.uploaded_at) }}</td>
+            <tr class="align-top hover:bg-zinc-950/60" data-video-original-name="{{ video.original_name|lower }}">
               <td class="px-3 py-3">
-                {% if video.is_used %}
-                  <span class="inline-flex rounded-full border border-amber-800 bg-amber-950 px-2 py-1 text-xs font-medium text-amber-200">used</span>
-                  <div class="mt-1 text-xs text-zinc-500">{{ video.live_job_count }} live jobs</div>
-                {% else %}
-                  <span class="inline-flex rounded-full border border-emerald-800 bg-emerald-950 px-2 py-1 text-xs font-medium text-emerald-200">unused</span>
+                <div class="break-words font-medium">{{ video.original_name }}</div>
+                <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                  <span>{{ video.file_size }}</span>
+                  <span aria-hidden="true">/</span>
+                  {% if video.is_used %}
+                    <span class="text-amber-300">used by {{ video.live_job_count }} live job{% if video.live_job_count != 1 %}s{% endif %}</span>
+                  {% else %}
+                    <span class="text-emerald-300">unused</span>
+                  {% endif %}
+                  <span class="sm:hidden">/ {{ display_dt(video.uploaded_at) }}</span>
+                </div>
+                {% if not video.file_exists %}
+                  <div class="mt-2 rounded-md border border-red-900 bg-red-950 px-2 py-1 text-xs font-normal text-red-200">File video tidak ditemukan.</div>
                 {% endif %}
+                <div id="details-{{ video.id }}" class="mt-3 hidden rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-400">
+                  <div class="mb-2 font-medium text-zinc-300">Stored filename</div>
+                  <div class="break-all font-mono">{{ video.filename }}</div>
+                  <button type="button" data-copy-value="{{ video.filename }}" class="mt-3 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs font-medium hover:bg-zinc-800">Copy stored filename</button>
+                </div>
               </td>
-              <td class="px-3 py-3 text-zinc-500"><div class="break-all">{{ video.filename }}</div></td>
+              <td class="hidden px-3 py-3 text-zinc-400 sm:table-cell">{{ display_dt(video.uploaded_at) }}</td>
               <td class="px-3 py-3 text-right">
+                <div class="flex justify-end gap-1.5">
+                  <button type="button" title="Preview" aria-label="Preview {{ video.original_name }}" data-preview-url="/videos/{{ video.id }}/preview" data-preview-title="{{ video.original_name }}" class="inline-flex h-9 w-9 items-center justify-center rounded-md border border-zinc-700 text-xs font-medium hover:bg-zinc-800">View</button>
+                  <button type="button" title="Details" aria-label="Details for {{ video.original_name }}" data-details-target="details-{{ video.id }}" class="inline-flex h-9 w-9 items-center justify-center rounded-md border border-zinc-700 text-xs font-medium hover:bg-zinc-800">Info</button>
+                  {% if video.is_used %}
+                    <button type="button" disabled title="Video masih dipakai Live Job dan belum bisa dihapus." aria-label="Delete disabled for {{ video.original_name }}" class="inline-flex h-9 w-9 cursor-not-allowed items-center justify-center rounded-md border border-zinc-800 text-xs font-medium text-zinc-600">Del</button>
+                  {% else %}
+                    <form method="post" action="/videos/{{ video.id }}/delete" onsubmit="return confirm('Delete this uploaded video? This will remove the file from uploads/videos and the database record.');">
+                      <button title="Delete" aria-label="Delete {{ video.original_name }}" class="inline-flex h-9 w-9 items-center justify-center rounded-md border border-red-900 text-xs font-medium text-red-300 hover:bg-red-950">Del</button>
+                    </form>
+                  {% endif %}
+                </div>
                 {% if video.is_used %}
-                  <button type="button" disabled title="Video masih dipakai Live Job" class="cursor-not-allowed rounded-md border border-zinc-800 px-3 py-2 text-xs font-medium text-zinc-600">Delete</button>
-                {% else %}
-                  <form method="post" action="/videos/{{ video.id }}/delete" onsubmit="return confirm('Delete this uploaded video? This will remove the file from uploads/videos and the database record.');">
-                    <button class="rounded-md border border-red-900 px-3 py-2 text-xs font-medium text-red-300 hover:bg-red-950">Delete</button>
-                  </form>
+                  <div class="mt-2 text-right text-[11px] leading-snug text-zinc-500">Tidak bisa dihapus</div>
                 {% endif %}
               </td>
             </tr>
           {% else %}
-            <tr><td colspan="6" class="px-3 py-6 text-center text-zinc-500">No uploaded videos yet.</td></tr>
+            <tr><td colspan="3" class="px-3 py-8 text-center text-zinc-500">No uploaded videos yet.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   </div>
 </section>
+
+<div id="video-preview-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/75 p-4">
+  <div class="w-full max-w-4xl rounded-lg border border-zinc-800 bg-zinc-900 p-4 shadow-xl">
+    <div class="mb-3 flex items-center justify-between gap-3">
+      <h3 id="video-preview-title" class="min-w-0 truncate text-base font-semibold">Preview video</h3>
+      <button type="button" id="video-preview-close" class="rounded-md border border-zinc-700 px-3 py-2 text-sm hover:bg-zinc-800">Close</button>
+    </div>
+    <video id="video-preview-player" class="aspect-video w-full rounded-md bg-black" controls preload="metadata"></video>
+  </div>
+</div>
+
 <script>
   const uploadVideoFile = document.getElementById("upload-video-file");
+  const uploadVideoForm = document.getElementById("upload-video-form");
   const uploadPendingWarning = document.getElementById("upload-pending-warning");
-  if (uploadVideoFile && uploadPendingWarning) {
+  const uploadDuplicateWarning = document.getElementById("upload-duplicate-warning");
+  const existingVideoNames = Array.from(document.querySelectorAll("[data-video-original-name]"))
+    .map((row) => (row.dataset.videoOriginalName || "").trim().toLowerCase());
+
+  function selectedUploadName() {
+    return uploadVideoFile && uploadVideoFile.files.length ? uploadVideoFile.files[0].name.trim().toLowerCase() : "";
+  }
+
+  function selectedUploadIsDuplicate() {
+    const name = selectedUploadName();
+    return Boolean(name && existingVideoNames.includes(name));
+  }
+
+  if (uploadVideoFile && uploadPendingWarning && uploadDuplicateWarning) {
     uploadVideoFile.addEventListener("change", () => {
       uploadPendingWarning.classList.toggle("hidden", uploadVideoFile.files.length === 0);
+      uploadDuplicateWarning.classList.toggle("hidden", !selectedUploadIsDuplicate());
     });
   }
+
+  if (uploadVideoForm) {
+    uploadVideoForm.addEventListener("submit", (event) => {
+      if (selectedUploadIsDuplicate()) {
+        const confirmed = confirm("Video dengan nama file ini sudah pernah di-upload. Lanjut upload sebagai salinan baru?");
+        if (!confirmed) {
+          event.preventDefault();
+        }
+      }
+    });
+  }
+
+  document.querySelectorAll("[data-details-target]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const detail = document.getElementById(button.dataset.detailsTarget);
+      if (detail) {
+        detail.classList.toggle("hidden");
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-copy-value]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const value = button.dataset.copyValue || "";
+      try {
+        await navigator.clipboard.writeText(value);
+        const previous = button.textContent;
+        button.textContent = "Copied";
+        setTimeout(() => { button.textContent = previous; }, 1200);
+      } catch (error) {
+        window.prompt("Copy stored filename", value);
+      }
+    });
+  });
+
+  const previewModal = document.getElementById("video-preview-modal");
+  const previewPlayer = document.getElementById("video-preview-player");
+  const previewTitle = document.getElementById("video-preview-title");
+  const previewClose = document.getElementById("video-preview-close");
+
+  function closePreview() {
+    if (!previewModal || !previewPlayer) {
+      return;
+    }
+    previewPlayer.pause();
+    previewPlayer.removeAttribute("src");
+    previewPlayer.load();
+    previewModal.classList.add("hidden");
+    previewModal.classList.remove("flex");
+  }
+
+  document.querySelectorAll("[data-preview-url]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!previewModal || !previewPlayer || !previewTitle) {
+        return;
+      }
+      previewTitle.textContent = button.dataset.previewTitle || "Preview video";
+      previewPlayer.src = button.dataset.previewUrl || "";
+      previewModal.classList.remove("hidden");
+      previewModal.classList.add("flex");
+    });
+  });
+
+  if (previewClose) {
+    previewClose.addEventListener("click", closePreview);
+  }
+  if (previewModal) {
+    previewModal.addEventListener("click", (event) => {
+      if (event.target === previewModal) {
+        closePreview();
+      }
+    });
+  }
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closePreview();
+    }
+  });
 </script>
 {% endblock %}

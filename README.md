@@ -111,7 +111,7 @@ Uploaded videos are saved to `uploads/videos`. Uploaded audio is saved to `uploa
 The admin UI is split into tabs with a responsive dark dashboard layout:
 
 - `Dashboard`: live/channel monitoring panel with status totals, Live Monitor, Channel Matrix, compact System Monitor, FFmpeg diagnostics, and latest log preview.
-- `Channels`: channel records used by Live Jobs. A placeholder note is shown while the full channel workflow continues to evolve.
+- `Channels`: manual channel records with summary cards, filters, readable table layout, edit actions, active/inactive status, and optional default stream keys.
 - `Video Library`: MP4 upload and uploaded video list.
 - `Audio Library`: global MP3, WAV, and M4A uploads with duration, size, preview, and delete controls.
 - `Playlists`: per-channel song queues built from the global Audio Library.
@@ -123,7 +123,9 @@ The admin UI is split into tabs with a responsive dark dashboard layout:
 
 ## Channel Management
 
-Add channels from the `Channels` tab before creating a Live Job. The Create Live Job form only shows active channels.
+Add channels from the `Channels` tab before creating a Live Job. Channel names are entered manually for now. Automatic channel-name sync will require YouTube API integration later and is not implemented yet.
+
+The Create Live Job form only shows active channels.
 
 Each channel can store:
 
@@ -138,9 +140,11 @@ Channel names are required and must be unique.
 
 If a channel has a default stream key, selecting that channel auto-fills the stream key field in the Live Job form. You can still edit the stream key before creating the job. Stream keys are hidden by default in forms, can be revealed with the eye button when you need to check them, and are masked in tables/logs where possible.
 
+The Channels table does not display stream keys directly. It only shows whether a default stream key is configured, and the edit form keeps the stream key field masked until you reveal it.
+
 Never share stream keys publicly and do not commit stream keys to GitHub. Keep them in `.env`, in the local admin UI, or in another private password manager.
 
-Inactive channels stay in the database but are hidden from the Create Live Job dropdown. If a channel is already used by live jobs, deleting it will set it inactive instead of removing it, so existing jobs keep working and can still display their channel name.
+Inactive channels stay in the database but are hidden from the Create Live Job dropdown. You can activate or deactivate channels from the Channels table. If a channel is already used by live jobs, deleting it will set it inactive instead of removing it, so existing jobs keep working and can still display their channel name.
 
 ## Video Library
 
