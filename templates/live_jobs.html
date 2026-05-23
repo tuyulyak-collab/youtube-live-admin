@@ -1,122 +1,240 @@
 {% extends "admin.html" %}
 {% block title %}Live Jobs{% endblock %}
 {% block admin_content %}
-<section class="grid gap-6 xl:grid-cols-5">
-  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4 xl:col-span-2">
-    <h3 class="text-base font-semibold">Create Live Job</h3>
-    <form id="create-job-form" method="post" action="/jobs" class="mt-4 space-y-5">
-      <fieldset class="border-t border-zinc-800 pt-4">
-        <legend class="pr-3 text-sm font-semibold">Informasi Live</legend>
-        <div class="mt-3 grid gap-4 sm:grid-cols-2">
-          <label class="block">
-            <span class="text-sm font-medium text-zinc-300">Live name</span>
-            <input id="live-name-input" name="live_name" required class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
-          </label>
-          <label class="block">
-            <span class="text-sm font-medium text-zinc-300">Channel</span>
-            <select id="channel-id-input" name="channel_id" required class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
-              {% for channel in active_channels %}
-                <option value="{{ channel.id }}" data-stream-key="{{ channel.default_stream_key or '' }}">{{ channel.name }}{% if channel.handle %} ({{ channel.handle }}){% endif %}</option>
-              {% else %}
-                <option value="">Belum ada channel aktif. Tambahkan channel terlebih dahulu.</option>
-              {% endfor %}
-            </select>
-          </label>
-          <label class="block sm:col-span-2">
-            <span class="text-sm font-medium text-zinc-300">Video</span>
-            <select id="video-id-input" name="video_id" required class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
-              {% for video in videos %}
-                <option value="{{ video.id }}">{{ video.original_name }}</option>
-              {% else %}
-                <option value="">Belum ada video. Upload video terlebih dahulu.</option>
-              {% endfor %}
-            </select>
-            <span class="mt-1 block text-xs text-zinc-500">Pilih video yang sudah berhasil di-upload.</span>
-          </label>
-          <label class="block sm:col-span-2">
-            <span class="text-sm font-medium text-zinc-300">Prepared audio playlist (optional)</span>
-            <select id="audio-playlist-input" name="audio_playlist_id" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
-              <option value="" data-channel-id="">Use video audio / original input</option>
-              {% for playlist in ready_playlists %}
-                <option value="{{ playlist.id }}" data-channel-id="{{ playlist.channel_id }}">{{ playlist.channel_name }} · {{ playlist.name }} · {{ format_seconds(playlist.total_duration_seconds or playlist.item_duration_seconds) }}</option>
-              {% endfor %}
-            </select>
-            <span id="audio-playlist-helper" class="mt-1 block text-xs text-zinc-500">Only ready playlists for the selected channel are shown.</span>
-          </label>
-        </div>
-      </fieldset>
-
-      <fieldset class="border-t border-zinc-800 pt-4">
-        <legend class="pr-3 text-sm font-semibold">Koneksi YouTube</legend>
-        <div class="mt-3">
-          <span class="text-sm font-medium text-zinc-300">YouTube stream key</span>
-          <span class="mt-1 flex rounded-md border border-zinc-700 bg-zinc-950 focus-within:border-emerald-500">
-            <input id="stream-key-input" name="stream_key" type="password" required autocomplete="off" class="min-w-0 flex-1 rounded-l-md bg-transparent px-3 py-2 text-sm outline-none">
-            <button type="button" data-secret-toggle data-target="stream-key-input" aria-label="Show stream key" class="flex w-11 items-center justify-center rounded-r-md border-l border-zinc-700 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100">
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-            </button>
-          </span>
-          <span class="mt-1 block text-xs text-zinc-500">Klik ikon mata untuk melihat atau menyembunyikan stream key.</span>
-        </div>
-      </fieldset>
-
-      <fieldset class="border-t border-zinc-800 pt-4">
-        <legend class="pr-3 text-sm font-semibold">Jadwal Live</legend>
-        <div class="mt-3 space-y-4">
-          <div class="grid gap-2 sm:grid-cols-3">
-            <label class="flex cursor-pointer items-start gap-2 rounded-md border border-zinc-800 p-3 text-sm hover:bg-zinc-950"><input type="radio" name="schedule_mode" value="manual_now" checked class="mt-1"><span><span class="block font-medium">Manual start</span><span class="block text-xs text-zinc-500">Start lewat tombol</span></span></label>
-            <label class="flex cursor-pointer items-start gap-2 rounded-md border border-zinc-800 p-3 text-sm hover:bg-zinc-950"><input type="radio" name="schedule_mode" value="start_end" class="mt-1"><span><span class="block font-medium">Start & End datetime</span><span class="block text-xs text-zinc-500">Durasi otomatis</span></span></label>
-            <label class="flex cursor-pointer items-start gap-2 rounded-md border border-zinc-800 p-3 text-sm hover:bg-zinc-950"><input type="radio" name="schedule_mode" value="start_duration" class="mt-1"><span><span class="block font-medium">Start datetime + Duration</span><span class="block text-xs text-zinc-500">Selesai otomatis</span></span></label>
-          </div>
-          <p id="schedule-mode-helper" class="rounded-md border border-sky-900 bg-sky-950 px-3 py-2 text-xs text-sky-200">Live bisa dimulai manual dengan tombol Start.</p>
-          <div class="grid gap-4 sm:grid-cols-2">
-            <label id="schedule-start-field" class="hidden"><span class="text-sm font-medium text-zinc-300">Start datetime</span><input id="schedule-start-input" name="start_at" type="datetime-local" disabled class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"></label>
-            <label id="schedule-end-field" class="hidden"><span class="text-sm font-medium text-zinc-300">End datetime</span><input id="schedule-end-input" name="end_at" type="datetime-local" disabled class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"></label>
-            <label id="schedule-duration-field" class="block"><span class="text-sm font-medium text-zinc-300">Duration minutes</span><input id="schedule-duration-input" name="duration_minutes" type="number" min="1" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"></label>
-            <div id="schedule-preview" class="hidden rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-300 sm:col-span-2"></div>
-            <p id="schedule-validation-helper" class="hidden rounded-md border border-amber-900 bg-amber-950 px-3 py-2 text-xs text-amber-200 sm:col-span-2"></p>
-          </div>
-          <label class="block"><span class="text-sm font-medium text-zinc-300">Status</span><select name="status" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"><option value="stopped">Stopped</option><option value="scheduled">Scheduled</option></select></label>
-        </div>
-      </fieldset>
-
+<section class="space-y-6">
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <div>
-        <button id="create-job-button" disabled class="w-full rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-400">Create job</button>
-        <p id="create-job-helper" class="mt-2 rounded-md border border-amber-900 bg-amber-950 px-3 py-2 text-xs text-amber-200">Lengkapi live name, channel, stream key, dan pilih video dulu.</p>
+        <h3 class="text-base font-semibold">Create Live Job</h3>
+        <p class="mt-1 text-sm text-zinc-400">Siapkan live, media, koneksi, dan jadwal dalam satu form.</p>
+      </div>
+    </div>
+
+    <form id="create-job-form" method="post" action="/jobs" class="mt-5 space-y-5">
+      <div class="grid gap-5 lg:grid-cols-2">
+        <fieldset class="rounded-lg border border-zinc-800 p-4">
+          <legend class="px-2 text-sm font-semibold text-zinc-100">Informasi Live</legend>
+          <div class="mt-2 grid gap-4 sm:grid-cols-2">
+            <label class="block">
+              <span class="text-sm font-medium text-zinc-300">Live name</span>
+              <input id="live-name-input" name="live_name" required class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+            </label>
+            <label class="block">
+              <span class="text-sm font-medium text-zinc-300">Channel</span>
+              <select id="channel-id-input" name="channel_id" required class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+                {% for channel in active_channels %}
+                  <option value="{{ channel.id }}" data-stream-key="{{ channel.default_stream_key or '' }}">{{ channel.name }}{% if channel.handle %} ({{ channel.handle }}){% endif %}</option>
+                {% else %}
+                  <option value="">Belum ada channel aktif. Tambahkan channel terlebih dahulu.</option>
+                {% endfor %}
+              </select>
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset class="rounded-lg border border-zinc-800 p-4">
+          <legend class="px-2 text-sm font-semibold text-zinc-100">Media</legend>
+          <div class="mt-2 grid gap-4">
+            <label class="block">
+              <span class="text-sm font-medium text-zinc-300">Video</span>
+              <select id="video-id-input" name="video_id" required class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+                {% for video in videos %}
+                  <option value="{{ video.id }}">{{ video.original_name }}</option>
+                {% else %}
+                  <option value="">Belum ada video. Upload video terlebih dahulu.</option>
+                {% endfor %}
+              </select>
+              <span class="mt-1 block text-xs text-zinc-500">Pilih video yang sudah berhasil di-upload.</span>
+            </label>
+            <label class="block">
+              <span class="text-sm font-medium text-zinc-300">Prepared audio playlist (optional)</span>
+              <select id="audio-playlist-input" name="audio_playlist_id" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+                <option value="" data-channel-id="">Use video audio / original input</option>
+                {% for playlist in ready_playlists %}
+                  <option value="{{ playlist.id }}" data-channel-id="{{ playlist.channel_id }}">{{ playlist.channel_name }} &middot; {{ playlist.name }} &middot; {{ format_seconds(playlist.total_duration_seconds or playlist.item_duration_seconds) }}</option>
+                {% endfor %}
+              </select>
+              <span id="audio-playlist-helper" class="mt-1 block text-xs text-zinc-500">Only ready playlists for the selected channel are shown.</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset class="rounded-lg border border-zinc-800 p-4">
+          <legend class="px-2 text-sm font-semibold text-zinc-100">Koneksi YouTube</legend>
+          <div class="mt-2">
+            <span class="text-sm font-medium text-zinc-300">YouTube stream key</span>
+            <span class="mt-1 flex rounded-md border border-zinc-700 bg-zinc-950 focus-within:border-emerald-500">
+              <input id="stream-key-input" name="stream_key" type="password" required autocomplete="off" class="min-w-0 flex-1 rounded-l-md bg-transparent px-3 py-2 text-sm outline-none">
+              <button type="button" data-secret-toggle data-target="stream-key-input" aria-label="Show stream key" class="flex w-11 shrink-0 items-center justify-center rounded-r-md border-l border-zinc-700 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              </button>
+            </span>
+            <span class="mt-1 block text-xs text-zinc-500">Klik ikon mata untuk melihat atau menyembunyikan stream key.</span>
+          </div>
+        </fieldset>
+
+        <fieldset class="rounded-lg border border-zinc-800 p-4 lg:col-span-2">
+          <legend class="px-2 text-sm font-semibold text-zinc-100">Jadwal Live</legend>
+          <div class="mt-2 space-y-4">
+            <div class="grid gap-3 lg:grid-cols-3">
+              <label class="flex min-h-20 cursor-pointer items-start gap-2 rounded-md border border-zinc-800 p-3 text-sm hover:bg-zinc-950"><input type="radio" name="schedule_mode" value="manual_now" checked class="mt-1"><span><span class="block font-medium">Manual start</span><span class="block text-xs text-zinc-500">Start lewat tombol</span></span></label>
+              <label class="flex min-h-20 cursor-pointer items-start gap-2 rounded-md border border-zinc-800 p-3 text-sm hover:bg-zinc-950"><input type="radio" name="schedule_mode" value="start_end" class="mt-1"><span><span class="block font-medium">Start & End datetime</span><span class="block text-xs text-zinc-500">Durasi otomatis</span></span></label>
+              <label class="flex min-h-20 cursor-pointer items-start gap-2 rounded-md border border-zinc-800 p-3 text-sm hover:bg-zinc-950"><input type="radio" name="schedule_mode" value="start_duration" class="mt-1"><span><span class="block font-medium">Start datetime + Duration</span><span class="block text-xs text-zinc-500">Selesai otomatis</span></span></label>
+            </div>
+            <p id="schedule-mode-helper" class="rounded-md border border-sky-900 bg-sky-950 px-3 py-2 text-xs text-sky-200">Live bisa dimulai manual dengan tombol Start.</p>
+            <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <label id="schedule-start-field" class="hidden"><span class="text-sm font-medium text-zinc-300">Start datetime</span><input id="schedule-start-input" name="start_at" type="datetime-local" disabled class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"></label>
+              <label id="schedule-end-field" class="hidden"><span class="text-sm font-medium text-zinc-300">End datetime</span><input id="schedule-end-input" name="end_at" type="datetime-local" disabled class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"></label>
+              <label id="schedule-duration-field" class="block"><span class="text-sm font-medium text-zinc-300">Duration minutes</span><input id="schedule-duration-input" name="duration_minutes" type="number" min="1" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"></label>
+              <label class="block"><span class="text-sm font-medium text-zinc-300">Status</span><select name="status" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"><option value="stopped">Stopped</option><option value="queued">Queued</option><option value="scheduled">Scheduled</option></select></label>
+              <div id="schedule-preview" class="hidden rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-300 md:col-span-2 xl:col-span-4"></div>
+              <p id="schedule-validation-helper" class="hidden rounded-md border border-amber-900 bg-amber-950 px-3 py-2 text-xs text-amber-200 md:col-span-2 xl:col-span-4"></p>
+            </div>
+          </div>
+        </fieldset>
+      </div>
+
+      <div class="flex flex-col gap-3 border-t border-zinc-800 pt-5 sm:flex-row sm:items-start sm:justify-between">
+        <p id="create-job-helper" class="rounded-md border border-amber-900 bg-amber-950 px-3 py-2 text-xs text-amber-200">Lengkapi live name, channel, stream key, dan pilih video dulu.</p>
+        <button id="create-job-button" disabled class="rounded-md bg-emerald-500 px-5 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-400">Create job</button>
       </div>
     </form>
   </div>
 
-  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4 xl:col-span-3">
-    <h3 class="text-base font-semibold">Live Jobs</h3>
-    <div class="mt-4 overflow-x-auto">
-      <table class="min-w-full divide-y divide-zinc-800 text-sm">
-        <thead class="text-left text-xs uppercase tracking-wide text-zinc-500">
-          <tr><th class="py-2 pr-4">Live</th><th class="py-2 pr-4">Channel</th><th class="py-2 pr-4">Video</th><th class="py-2 pr-4">Status</th><th class="py-2 pr-4">Schedule</th><th class="py-2 text-right">Actions</th></tr>
+  <form method="get" action="/live-jobs" class="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+    <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <h3 class="text-base font-semibold">Filters</h3>
+        <p class="mt-1 text-sm text-zinc-400">Filter daftar live job tanpa menyempitkan tabel.</p>
+      </div>
+      <div class="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-300">
+        Showing <span class="font-semibold text-zinc-100">{{ jobs|length }}</span> jobs
+      </div>
+    </div>
+    <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+      <label class="block">
+        <span class="text-xs font-medium text-zinc-500">Channel</span>
+        <select name="channel_id" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+          <option value="">All channels</option>
+          {% for channel in channels %}
+            <option value="{{ channel.id }}" {% if job_filters.channel_id == channel.id|string %}selected{% endif %}>{{ channel.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="block">
+        <span class="text-xs font-medium text-zinc-500">Status</span>
+        <select name="status" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+          <option value="">All statuses</option>
+          {% for status in job_statuses %}
+            <option value="{{ status }}" {% if job_filters.status == status %}selected{% endif %}>{{ status }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="block">
+        <span class="text-xs font-medium text-zinc-500">Date from</span>
+        <input name="date_from" value="{{ job_filters.date_from or '' }}" type="date" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+      </label>
+      <label class="block">
+        <span class="text-xs font-medium text-zinc-500">Date to</span>
+        <input name="date_to" value="{{ job_filters.date_to or '' }}" type="date" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+      </label>
+      <label class="block md:col-span-2 xl:col-span-1">
+        <span class="text-xs font-medium text-zinc-500">Search</span>
+        <input name="search" value="{{ job_filters.search or '' }}" placeholder="Live, channel, video" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+      </label>
+      <label class="block">
+        <span class="text-xs font-medium text-zinc-500">Sort</span>
+        <select name="sort" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+          <option value="newest" {% if (job_filters.sort or 'newest') == 'newest' %}selected{% endif %}>Newest</option>
+          <option value="oldest" {% if job_filters.sort == 'oldest' %}selected{% endif %}>Oldest</option>
+          <option value="channel_az" {% if job_filters.sort == 'channel_az' %}selected{% endif %}>Channel A-Z</option>
+          <option value="status" {% if job_filters.sort == 'status' %}selected{% endif %}>Status</option>
+          <option value="scheduled_start" {% if job_filters.sort == 'scheduled_start' %}selected{% endif %}>Scheduled start time</option>
+        </select>
+      </label>
+    </div>
+    <div class="mt-4 flex flex-wrap gap-2">
+      <button class="rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400">Apply filters</button>
+      <a href="/live-jobs" class="rounded-md border border-zinc-700 px-4 py-2 text-sm font-medium hover:bg-zinc-800">Clear</a>
+    </div>
+  </form>
+
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+    <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+      <div class="flex flex-wrap items-center gap-2">
+        <button type="button" id="select-all-jobs" class="rounded-md border border-zinc-700 px-3 py-2 text-xs font-medium hover:bg-zinc-800">Select All</button>
+        <button type="button" id="unselect-all-jobs" class="rounded-md border border-zinc-700 px-3 py-2 text-xs font-medium hover:bg-zinc-800">Unselect All</button>
+        <span id="selected-job-count" class="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-300">Selected: 0</span>
+      </div>
+      <form id="bulk-jobs-form" method="post" action="/jobs/bulk" class="flex flex-wrap gap-2">
+        <div id="bulk-job-inputs"></div>
+        <button name="action" value="start" class="rounded-md bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-500">Start Selected</button>
+        <button name="action" value="stop" class="rounded-md bg-red-700 px-3 py-2 text-xs font-medium text-white hover:bg-red-600">Stop Selected</button>
+        <button name="action" value="queue" class="rounded-md bg-sky-700 px-3 py-2 text-xs font-medium text-white hover:bg-sky-600">Move Selected to Queue</button>
+        <button name="action" value="delete" class="rounded-md border border-red-900 px-3 py-2 text-xs font-medium text-red-300 hover:bg-red-950">Delete Selected</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h3 class="text-base font-semibold">Live Jobs</h3>
+        <p class="mt-1 text-sm text-zinc-400">Control single jobs or scroll horizontally for all columns.</p>
+      </div>
+    </div>
+    <div class="mt-4 overflow-x-auto rounded-lg border border-zinc-800">
+      <table class="min-w-[1180px] table-fixed divide-y divide-zinc-800 text-sm">
+        <thead class="bg-zinc-950 text-left text-xs uppercase tracking-wide text-zinc-500">
+          <tr>
+            <th class="w-14 px-3 py-3">Pick</th>
+            <th class="w-56 px-3 py-3">Live</th>
+            <th class="w-44 px-3 py-3">Channel</th>
+            <th class="w-72 px-3 py-3">Media</th>
+            <th class="w-56 px-3 py-3">Schedule</th>
+            <th class="w-52 px-3 py-3">Status</th>
+            <th class="w-56 px-3 py-3 text-right">Actions</th>
+          </tr>
         </thead>
         <tbody class="divide-y divide-zinc-800">
           {% for job in jobs %}
-            <tr>
-              <td class="py-3 pr-4 font-medium">{{ job.live_name }}<div class="text-xs font-normal text-zinc-500">Key {{ mask_secret(job.stream_key) }}</div></td>
-              <td class="py-3 pr-4">{{ job.display_channel_name or job.channel_name }}</td>
-              <td class="max-w-xs truncate py-3 pr-4 text-zinc-400">
-                {{ job.video_original_name }}
+            <tr class="h-24 align-top hover:bg-zinc-950/60">
+              <td class="px-3 py-3">
+                <input type="checkbox" value="{{ job.id }}" class="job-checkbox rounded border-zinc-700 bg-zinc-950 text-emerald-500 focus:ring-emerald-500">
+              </td>
+              <td class="px-3 py-3 font-medium">
+                <div class="break-words">{{ job.live_name }}</div>
+                <div class="mt-1 text-xs font-normal text-zinc-500">Key {{ mask_secret(job.stream_key) }}</div>
+              </td>
+              <td class="px-3 py-3"><div class="break-words">{{ job.display_channel_name or job.channel_name }}</div></td>
+              <td class="px-3 py-3 text-zinc-400">
+                <div class="break-words">{{ job.video_original_name }}</div>
                 {% if job.audio_playlist_name %}
                   <div class="mt-1 text-xs text-emerald-300">Audio: {{ job.audio_playlist_name }}</div>
+                {% else %}
+                  <div class="mt-1 text-xs text-zinc-600">Audio: video original</div>
                 {% endif %}
               </td>
-              <td class="py-3 pr-4"><span class="rounded-full bg-zinc-800 px-2 py-1 text-xs">{{ job.status }}</span>{% if job.last_error %}<div class="mt-1 max-w-xs text-xs text-red-300">{{ job.last_error }}</div>{% endif %}</td>
-              <td class="py-3 pr-4 text-xs text-zinc-400">{% for line in job_schedule_lines(job) %}<div>{{ line }}</div>{% endfor %}</td>
-              <td class="py-3">
-                <div class="flex justify-end gap-2">
-                  <form method="post" action="/jobs/{{ job.id }}/start"><button class="rounded-md bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-500">Start</button></form>
-                  <form method="post" action="/jobs/{{ job.id }}/stop"><button class="rounded-md bg-red-700 px-3 py-2 text-xs font-medium text-white hover:bg-red-600">Stop</button></form>
-                  <a href="/jobs/{{ job.id }}/logs" class="rounded-md border border-zinc-700 px-3 py-2 text-xs font-medium hover:bg-zinc-800">Logs</a>
+              <td class="px-3 py-3 text-xs text-zinc-400">{% for line in job_schedule_lines(job) %}<div class="leading-5">{{ line }}</div>{% endfor %}</td>
+              <td class="px-3 py-3">
+                <span class="inline-flex rounded-full border px-2 py-1 text-xs font-medium {{ status_badge_class(job.status) }}">{{ job.status }}</span>
+                <div class="mt-2 space-y-1 text-xs text-zinc-500">
+                  <div>PID: {{ job.pid or '-' }}</div>
+                  <div>Running: {{ running_duration(job) }}</div>
+                </div>
+                {% if job.last_error %}<div class="mt-2 break-words text-xs text-red-300">{{ job.last_error }}</div>{% endif %}
+              </td>
+              <td class="px-3 py-3">
+                <div class="flex flex-nowrap justify-end gap-2">
+                  <form method="post" action="/jobs/{{ job.id }}/start"><button class="rounded-md bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-500">Start</button></form>
+                  <form method="post" action="/jobs/{{ job.id }}/stop"><button class="rounded-md bg-red-700 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-red-600">Stop</button></form>
+                  <a href="/jobs/{{ job.id }}/logs" class="rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs font-medium hover:bg-zinc-800">Logs</a>
+                  <form method="post" action="/jobs/{{ job.id }}/delete" onsubmit="return confirm('Delete this live job? Uploaded videos, audio, and playlists will not be deleted.');"><button class="rounded-md border border-red-900 px-2.5 py-1.5 text-xs font-medium text-red-300 hover:bg-red-950">Del</button></form>
                 </div>
               </td>
             </tr>
           {% else %}
-            <tr><td colspan="6" class="py-6 text-center text-zinc-500">No live jobs yet.</td></tr>
+            <tr><td colspan="7" class="px-3 py-8 text-center text-zinc-500">No live jobs match the current filters.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -141,6 +259,12 @@
   const scheduleDurationInput = document.getElementById("schedule-duration-input");
   const schedulePreview = document.getElementById("schedule-preview");
   const scheduleValidationHelper = document.getElementById("schedule-validation-helper");
+  const jobCheckboxes = Array.from(document.querySelectorAll(".job-checkbox"));
+  const selectedJobCount = document.getElementById("selected-job-count");
+  const selectAllJobsButton = document.getElementById("select-all-jobs");
+  const unselectAllJobsButton = document.getElementById("unselect-all-jobs");
+  const bulkJobsForm = document.getElementById("bulk-jobs-form");
+  const bulkJobInputs = document.getElementById("bulk-job-inputs");
   let lastAutoFilledStreamKey = "";
   function selectedScheduleMode() { const selected = scheduleModeInputs.find((field) => field.checked); return selected ? selected.value : "manual_now"; }
   function parseLocalDateTime(value) { if (!value) return null; const date = new Date(value); return Number.isNaN(date.getTime()) ? null : date; }
@@ -165,10 +289,40 @@
       });
     });
   }
+  function updateSelectedJobs() {
+    const selectedCount = jobCheckboxes.filter((checkbox) => checkbox.checked).length;
+    if (selectedJobCount) selectedJobCount.textContent = `Selected: ${selectedCount}`;
+  }
+  if (selectAllJobsButton) selectAllJobsButton.addEventListener("click", () => { jobCheckboxes.forEach((checkbox) => { checkbox.checked = true; }); updateSelectedJobs(); });
+  if (unselectAllJobsButton) unselectAllJobsButton.addEventListener("click", () => { jobCheckboxes.forEach((checkbox) => { checkbox.checked = false; }); updateSelectedJobs(); });
+  jobCheckboxes.forEach((checkbox) => checkbox.addEventListener("change", updateSelectedJobs));
+  if (bulkJobsForm && bulkJobInputs) {
+    bulkJobsForm.addEventListener("submit", (event) => {
+      const selected = jobCheckboxes.filter((checkbox) => checkbox.checked);
+      const action = event.submitter ? event.submitter.value : "";
+      if (!selected.length) {
+        event.preventDefault();
+        alert("Select at least one live job first.");
+        return;
+      }
+      if (action === "delete" && !confirm("Delete selected live jobs? Running jobs will be skipped. Uploaded videos, audio, and playlists will not be deleted.")) {
+        event.preventDefault();
+        return;
+      }
+      bulkJobInputs.innerHTML = "";
+      selected.forEach((checkbox) => {
+        const input = document.createElement("input");
+        input.type = "hidden";
+        input.name = "job_ids";
+        input.value = checkbox.value;
+        bulkJobInputs.appendChild(input);
+      });
+    });
+  }
   requiredCreateJobFields.forEach((field) => { field.addEventListener("input", updateCreateJobHelper); field.addEventListener("change", updateCreateJobHelper); });
   if (channelIdInput) channelIdInput.addEventListener("change", () => { fillDefaultStreamKey(true); filterAudioPlaylists(); updateCreateJobHelper(); });
   scheduleModeInputs.forEach((field) => field.addEventListener("change", updateCreateJobHelper));
   [scheduleStartInput, scheduleEndInput, scheduleDurationInput].filter(Boolean).forEach((field) => { field.addEventListener("input", updateCreateJobHelper); field.addEventListener("change", updateCreateJobHelper); });
-  setupSecretToggles(); fillDefaultStreamKey(false); filterAudioPlaylists(); updateCreateJobHelper();
+  setupSecretToggles(); updateSelectedJobs(); fillDefaultStreamKey(false); filterAudioPlaylists(); updateCreateJobHelper();
 </script>
 {% endblock %}
