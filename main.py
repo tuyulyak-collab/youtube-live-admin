@@ -37,6 +37,13 @@ READY_DIR = BASE_DIR / "uploads" / "ready"
 LOG_DIR = BASE_DIR / "uploads" / "logs"
 DB_PATH = Path(os.getenv("DATABASE_PATH", DATA_DIR / "app.db"))
 APP_STARTED_AT = time.time()
+DEPLOY_FILES = {
+    "README_DEPLOY.md": BASE_DIR / "deploy" / "README_DEPLOY.md",
+    "install_ubuntu.sh": BASE_DIR / "deploy" / "install_ubuntu.sh",
+    "update_app.sh": BASE_DIR / "deploy" / "update_app.sh",
+    "youtube-live-admin.service.example": BASE_DIR / "deploy" / "youtube-live-admin.service.example",
+    "nginx.conf.example": BASE_DIR / "deploy" / "nginx.conf.example",
+}
 
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
@@ -2238,6 +2245,7 @@ def admin_context(
         "audio_dir": str(AUDIO_DIR),
         "ready_dir": str(READY_DIR),
         "log_dir": str(LOG_DIR),
+        "deploy_files": list(DEPLOY_FILES.keys()),
     }
 
 def render_admin(
@@ -2589,6 +2597,17 @@ def settings_page(
     error: str | None = None,
 ):
     return render_admin("settings.html", request, db, "settings", "Settings", message, error)
+
+
+@app.get("/settings/deploy/{filename}")
+def view_deploy_file(
+    filename: str,
+    _: None = Depends(require_admin),
+):
+    path = DEPLOY_FILES.get(filename)
+    if not path or not path.exists():
+        return Response("Deploy helper file was not found.", status_code=404, media_type="text/plain")
+    return Response(path.read_text(encoding="utf-8", errors="replace"), media_type="text/plain")
 
 
 @app.post("/videos")

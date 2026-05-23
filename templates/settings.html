@@ -30,8 +30,106 @@
   </div>
 </section>
 
+{% macro command_block(command) -%}
+  <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-3" data-command-block>
+    <div class="flex items-start justify-between gap-3">
+      <pre class="min-w-0 overflow-x-auto whitespace-pre-wrap break-all text-xs leading-relaxed text-zinc-200">{{ command }}</pre>
+      <button type="button" data-copy-command class="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs font-medium hover:bg-zinc-800">Copy</button>
+    </div>
+  </div>
+{%- endmacro %}
+
+<section id="vps-deployment" class="mt-6 rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+    <div>
+      <h3 class="text-base font-semibold">VPS Deployment / Migrasi VPS</h3>
+      <p class="mt-1 text-sm text-zinc-400">Panduan deploy Ubuntu VPS. Perintah di bawah hanya ditampilkan untuk disalin, tidak dieksekusi dari web UI.</p>
+    </div>
+    <a href="/settings/deploy/README_DEPLOY.md" target="_blank" class="rounded-md border border-zinc-700 px-4 py-2 text-sm font-medium hover:bg-zinc-800">Open deploy guide</a>
+  </div>
+
+  <div class="mt-5 grid gap-4 lg:grid-cols-3">
+    <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+      <h4 class="text-sm font-semibold">Deployment checklist</h4>
+      <ul class="mt-3 space-y-2 text-sm text-zinc-300">
+        <li><label class="flex gap-2"><input type="checkbox" class="mt-1 rounded border-zinc-700 bg-zinc-900">Backup current data</label></li>
+        <li><label class="flex gap-2"><input type="checkbox" class="mt-1 rounded border-zinc-700 bg-zinc-900">Clone repo on Ubuntu VPS</label></li>
+        <li><label class="flex gap-2"><input type="checkbox" class="mt-1 rounded border-zinc-700 bg-zinc-900">Run install_ubuntu.sh</label></li>
+        <li><label class="flex gap-2"><input type="checkbox" class="mt-1 rounded border-zinc-700 bg-zinc-900">Edit .env</label></li>
+        <li><label class="flex gap-2"><input type="checkbox" class="mt-1 rounded border-zinc-700 bg-zinc-900">Install systemd service</label></li>
+        <li><label class="flex gap-2"><input type="checkbox" class="mt-1 rounded border-zinc-700 bg-zinc-900">Install nginx config</label></li>
+        <li><label class="flex gap-2"><input type="checkbox" class="mt-1 rounded border-zinc-700 bg-zinc-900">Restore backup if needed</label></li>
+        <li><label class="flex gap-2"><input type="checkbox" class="mt-1 rounded border-zinc-700 bg-zinc-900">Start/restart service</label></li>
+        <li><label class="flex gap-2"><input type="checkbox" class="mt-1 rounded border-zinc-700 bg-zinc-900">Check logs</label></li>
+      </ul>
+    </div>
+
+    <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-4 lg:col-span-2">
+      <h4 class="text-sm font-semibold">Deploy helper files</h4>
+      <p class="mt-1 text-sm text-zinc-400">Open helper file contents in a new tab.</p>
+      <div class="mt-3 flex flex-wrap gap-2">
+        <a href="/settings/deploy/README_DEPLOY.md" target="_blank" class="rounded-md border border-zinc-700 px-3 py-2 text-xs font-medium hover:bg-zinc-800">README_DEPLOY.md</a>
+        <a href="/settings/deploy/install_ubuntu.sh" target="_blank" class="rounded-md border border-zinc-700 px-3 py-2 text-xs font-medium hover:bg-zinc-800">install_ubuntu.sh</a>
+        <a href="/settings/deploy/update_app.sh" target="_blank" class="rounded-md border border-zinc-700 px-3 py-2 text-xs font-medium hover:bg-zinc-800">update_app.sh</a>
+        <a href="/settings/deploy/youtube-live-admin.service.example" target="_blank" class="rounded-md border border-zinc-700 px-3 py-2 text-xs font-medium hover:bg-zinc-800">systemd service</a>
+        <a href="/settings/deploy/nginx.conf.example" target="_blank" class="rounded-md border border-zinc-700 px-3 py-2 text-xs font-medium hover:bg-zinc-800">nginx config</a>
+      </div>
+
+      <div class="mt-5 rounded-lg border border-amber-900 bg-amber-950 p-4 text-sm text-amber-100">
+        <h4 class="font-semibold">Security notes</h4>
+        <ul class="mt-2 list-disc space-y-1 pl-5">
+          <li>Change default admin username/password before exposing the VPS.</li>
+          <li>Keep <code>.env</code> private.</li>
+          <li>Do not commit database, uploads, logs, ready files, or backups.</li>
+          <li>Use firewall rules now and HTTPS/domain later.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="mt-5 grid gap-4 xl:grid-cols-2">
+    <div class="space-y-3">
+      <h4 class="text-sm font-semibold">Clone and install</h4>
+      {{ command_block("cd /opt\nsudo git clone https://github.com/tuyulyak-collab/youtube-live-admin.git\nsudo chown -R $USER:$USER /opt/youtube-live-admin") }}
+      {{ command_block("cd /opt/youtube-live-admin") }}
+      {{ command_block("chmod +x deploy/install_ubuntu.sh") }}
+      {{ command_block("./deploy/install_ubuntu.sh") }}
+    </div>
+
+    <div class="space-y-3">
+      <h4 class="text-sm font-semibold">systemd service</h4>
+      {{ command_block("sudo cp deploy/youtube-live-admin.service.example /etc/systemd/system/youtube-live-admin.service") }}
+      {{ command_block("sudo systemctl daemon-reload") }}
+      {{ command_block("sudo systemctl enable youtube-live-admin") }}
+      {{ command_block("sudo systemctl start youtube-live-admin") }}
+      {{ command_block("sudo systemctl status youtube-live-admin") }}
+    </div>
+
+    <div class="space-y-3">
+      <h4 class="text-sm font-semibold">Nginx reverse proxy</h4>
+      {{ command_block("sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/youtube-live-admin") }}
+      {{ command_block("sudo ln -s /etc/nginx/sites-available/youtube-live-admin /etc/nginx/sites-enabled/") }}
+      {{ command_block("sudo nginx -t") }}
+      {{ command_block("sudo systemctl reload nginx") }}
+    </div>
+
+    <div class="space-y-3">
+      <h4 class="text-sm font-semibold">Logs and updates</h4>
+      {{ command_block("journalctl -u youtube-live-admin -f") }}
+      {{ command_block("cd /opt/youtube-live-admin\nchmod +x deploy/update_app.sh\n./deploy/update_app.sh") }}
+      <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+        <h5 class="text-sm font-semibold">Backup before migration</h5>
+        <p class="mt-2 text-sm text-zinc-400">Before migrating, copy the SQLite database and runtime folders from this machine. Restore them on the VPS before starting the service if needed.</p>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <a href="/settings/deploy/README_DEPLOY.md" target="_blank" class="rounded-md border border-zinc-700 px-3 py-2 text-xs font-medium hover:bg-zinc-800">Restore guide</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section class="mt-6 space-y-6">
-  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4" data-auto-refresh="30000">
+  <div id="system-monitor" class="rounded-lg border border-zinc-800 bg-zinc-900 p-4" data-auto-refresh="30000">
     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <h3 class="text-base font-semibold">System Monitor</h3>
@@ -138,6 +236,20 @@
   document.querySelectorAll("[data-auto-refresh]").forEach((element) => {
     const delay = Number(element.dataset.autoRefresh || "0");
     if (delay > 0) window.setTimeout(() => window.location.reload(), delay);
+  });
+  document.querySelectorAll("[data-copy-command]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const block = button.closest("[data-command-block]");
+      const command = block?.querySelector("pre")?.textContent || "";
+      try {
+        await navigator.clipboard.writeText(command);
+        const oldText = button.textContent;
+        button.textContent = "Copied";
+        window.setTimeout(() => { button.textContent = oldText; }, 1200);
+      } catch (error) {
+        alert("Copy failed. Select the command text manually.");
+      }
+    });
   });
 </script>
 {% endblock %}
