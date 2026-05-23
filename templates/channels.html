@@ -2,24 +2,47 @@
 {% block title %}Channels{% endblock %}
 {% block admin_content %}
 <section class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-  <h3 class="text-base font-semibold">Channels</h3>
-  <p class="mt-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-300">Channel management will be added next.</p>
+  <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <div>
+      <h3 class="text-base font-semibold">Channel Management</h3>
+      <p class="mt-1 text-sm text-zinc-400">Add, edit, activate, deactivate, or delete channels used by Live Jobs.</p>
+    </div>
+    <div class="grid grid-cols-3 gap-2 text-center text-sm">
+      <div class="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
+        <p class="text-xs text-zinc-500">Total</p>
+        <p class="font-semibold">{{ channels|length }}</p>
+      </div>
+      <div class="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
+        <p class="text-xs text-zinc-500">Active</p>
+        <p class="font-semibold text-emerald-400">{{ active_channels|length }}</p>
+      </div>
+      <div class="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
+        <p class="text-xs text-zinc-500">Inactive</p>
+        <p class="font-semibold text-zinc-300">{{ (channels|length) - (active_channels|length) }}</p>
+      </div>
+    </div>
+  </div>
 </section>
 
 <section class="mt-6 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-  <h3 class="text-base font-semibold">Current Channel Records</h3>
-  <p class="mt-1 text-sm text-zinc-400">These records are used by the Live Jobs channel dropdown.</p>
+  <h3 class="text-base font-semibold">Add Channel</h3>
+  <p class="mt-1 text-sm text-zinc-400">Active channels appear in the Live Jobs channel dropdown. Default stream keys are optional.</p>
   <form method="post" action="/channels" class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-    <input name="name" required placeholder="Name" class="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
-    <input name="handle" placeholder="@handle" class="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
-    <input name="niche" placeholder="Niche" class="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
-    <input name="default_stream_key" type="password" autocomplete="off" placeholder="Default stream key" class="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
-    <input name="notes" placeholder="Notes" class="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+    <label class="block"><span class="text-xs font-medium text-zinc-500">Name</span><input name="name" required placeholder="Channel name" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"></label>
+    <label class="block"><span class="text-xs font-medium text-zinc-500">Handle</span><input name="handle" placeholder="@handle" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"></label>
+    <label class="block"><span class="text-xs font-medium text-zinc-500">Niche</span><input name="niche" placeholder="Niche" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"></label>
+    <label class="block"><span class="text-xs font-medium text-zinc-500">Default stream key</span><input name="default_stream_key" type="password" autocomplete="off" placeholder="Optional" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"></label>
+    <label class="block"><span class="text-xs font-medium text-zinc-500">Notes</span><input name="notes" placeholder="Notes" class="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"></label>
     <div class="flex items-center gap-3">
       <label class="flex items-center gap-2 text-sm"><input name="is_active" type="checkbox" checked>Active</label>
       <button class="ml-auto rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400">Add</button>
     </div>
   </form>
+</section>
+
+<section class="mt-6 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+  <h3 class="text-base font-semibold">Channel List</h3>
+  <p class="mt-1 text-sm text-zinc-400">Deleting a channel that is already used by live jobs will mark it inactive instead.</p>
   <div class="mt-4 space-y-3">
     {% for channel in channels %}
       <div class="rounded-md border border-zinc-800 bg-zinc-950 p-3">

@@ -134,6 +134,8 @@ Each channel can store:
 - optional default stream key
 - active or inactive status
 
+Channel names are required and must be unique.
+
 If a channel has a default stream key, selecting that channel auto-fills the stream key field in the Live Job form. You can still edit the stream key before creating the job. Stream keys are masked in the visible channel list where possible.
 
 Inactive channels stay in the database but are hidden from the Create Live Job dropdown. If a channel is already used by live jobs, deleting it will set it inactive instead of removing it, so existing jobs keep working and can still display their channel name.

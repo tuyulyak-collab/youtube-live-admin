@@ -237,6 +237,16 @@ def clean_optional(value: str | None) -> str | None:
     cleaned = value.strip()
     return cleaned or None
 
+def channel_name_exists(conn: sqlite3.Connection, name: str, exclude_id: int | None = None) -> bool:
+    if exclude_id is None:
+        row = conn.execute("SELECT id FROM channels WHERE lower(name) = lower(?) LIMIT 1", (name,)).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT id FROM channels WHERE lower(name) = lower(?) AND id != ? LIMIT 1",
+            (name, exclude_id),
+        ).fetchone()
+    return row is not None
+
 def configured_ffmpeg_path() -> str:
     configured = os.getenv("FFMPEG_PATH", "").strip().strip("\"'")
     if configured:
@@ -621,6 +631,8 @@ def create_channel(
     clean_name = name.strip()
     if not clean_name:
         return redirect(f"/channels?{urlencode({'error': 'Channel name is required.'})}")
+    if channel_name_exists(db, clean_name):
+        return redirect(f"/channels?{urlencode({'error': 'Channel name already exists.'})}")
     now = dt_to_str(local_now())
     db.execute(
         """
@@ -661,6 +673,8 @@ def update_channel(
     channel = db.execute("SELECT id FROM channels WHERE id = ?", (channel_id,)).fetchone()
     if not channel:
         return redirect(f"/channels?{urlencode({'error': 'Channel was not found.'})}")
+    if channel_name_exists(db, clean_name, exclude_id=channel_id):
+        return redirect(f"/channels?{urlencode({'error': 'Channel name already exists.'})}")
     now = dt_to_str(local_now())
     db.execute(
         """
