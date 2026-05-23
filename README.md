@@ -110,9 +110,9 @@ Uploaded videos are saved to `uploads/videos`. FFmpeg logs are saved to `uploads
 
 Live jobs support three scheduling modes:
 
-- `Manual`: no start or end time is required. You can start the live stream later with the `Start` button. Duration is optional.
-- `Start & selesai`: set a start datetime and an end datetime. The app calculates the duration automatically, and the end datetime must be after the start datetime.
-- `Start & durasi`: set a start datetime and duration in minutes. The app previews the automatic finish time.
+- `Manual start`: no start or end time is required. You can start the live stream later with the `Start` button. Duration is optional.
+- `Start & End datetime`: set a start datetime and an end datetime. The app calculates the duration automatically, and the end datetime must be after the start datetime.
+- `Start datetime + Duration`: set a start datetime and duration in minutes. The app previews the automatic finish time.
 
 Existing jobs remain compatible because the app still stores scheduling data in `start_at`, `end_at`, and `duration_minutes`.
 

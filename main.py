@@ -96,22 +96,24 @@ def job_schedule_lines(job: dict[str, Any]) -> list[str]:
     duration = job.get("duration_minutes")
     if start_value and end_value:
         return [
-            f"Mulai: {display_dt(job.get('start_at'))}",
-            f"Selesai: {display_dt(job.get('end_at'))}",
-            f"Durasi: {format_duration_minutes(duration_between_minutes(start_value, end_value))}",
+            f"Scheduled: {display_dt(job.get('start_at'))} → {display_dt(job.get('end_at'))}",
+            f"Duration: {format_duration_minutes(duration_between_minutes(start_value, end_value))}",
+        ]
+    if start_value and duration:
+        calculated_end = start_value + timedelta(minutes=int(duration))
+        return [
+            f"Scheduled: {display_dt(job.get('start_at'))} → {display_dt(dt_to_str(calculated_end))}",
+            f"Duration: {format_duration_minutes(duration)}",
         ]
     if start_value:
-        lines = [f"Mulai: {display_dt(job.get('start_at'))}"]
-        if duration:
-            lines.append(f"Durasi: {int(duration)} menit")
-        return lines
+        return [f"Scheduled: {display_dt(job.get('start_at'))}"]
     if end_value:
         return [
-            f"Selesai: {display_dt(job.get('end_at'))}",
-            f"Durasi: {format_duration_minutes(duration)}",
+            f"Scheduled: until {display_dt(job.get('end_at'))}",
+            f"Duration: {format_duration_minutes(duration)}",
         ]
     if duration:
-        return [f"Durasi: {int(duration)} menit"]
+        return ["Manual start", f"Duration: {int(duration)} menit"]
     return ["Manual start"]
 
 def safe_filename(filename: str) -> str:
