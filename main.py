@@ -140,6 +140,13 @@ def format_bytes(num_bytes: float | int | None) -> str:
             return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} {unit}"
         value /= 1024
 
+def path_is_inside(child: Path, parent: Path) -> bool:
+    try:
+        child.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
 def usage_bar_class(percent: float | int | None) -> str:
     try:
         value = float(percent)
@@ -1252,6 +1259,34 @@ def duplicate_job_as_new(conn: sqlite3.Connection, job_id: int) -> tuple[bool, s
     conn.commit()
     return True, f"History job duplicated as Live Job #{db_cursor.lastrowid}."
 
+def fetch_videos_with_usage(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT videos.*,
+               COUNT(live_jobs.id) AS live_job_count
+        FROM videos
+        LEFT JOIN live_jobs ON live_jobs.video_id = videos.id
+        GROUP BY videos.id
+        ORDER BY videos.uploaded_at DESC
+        """
+    ).fetchall()
+    videos = []
+    for row in rows:
+        video = dict(row)
+        path = Path(video["path"])
+        video["file_exists"] = path.exists()
+        video["file_size_bytes"] = path.stat().st_size if path.exists() else None
+        video["file_size"] = format_bytes(video["file_size_bytes"])
+        video["is_used"] = int(video.get("live_job_count") or 0) > 0
+        videos.append(video)
+    return videos
+
+def annotate_job_file_state(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    for job in jobs:
+        video_path = job.get("video_path")
+        job["video_exists"] = Path(video_path).exists() if video_path else False
+    return jobs
+
 
 async def scheduler_loop() -> None:
     while True:
@@ -1816,9 +1851,9 @@ def admin_context(
     error: str | None = None,
     job_filters: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    videos = [dict(row) for row in db.execute("SELECT * FROM videos ORDER BY uploaded_at DESC").fetchall()]
-    jobs = fetch_live_jobs(db, job_filters if active_tab == "live_jobs" else None)
-    history_jobs = fetch_history_jobs(db, job_filters if active_tab == "history" else None)
+    videos = fetch_videos_with_usage(db)
+    jobs = annotate_job_file_state(fetch_live_jobs(db, job_filters if active_tab == "live_jobs" else None))
+    history_jobs = annotate_job_file_state(fetch_history_jobs(db, job_filters if active_tab == "history" else None))
     channels = [
         dict(row)
         for row in db.execute(
@@ -1940,6 +1975,7 @@ def admin_context(
         "format_duration_minutes": format_duration_minutes,
         "format_seconds": format_seconds,
         "format_runtime_seconds": format_runtime_seconds,
+        "format_bytes": format_bytes,
         "usage_bar_class": usage_bar_class,
         "job_runtime_seconds": job_runtime_seconds,
         "running_duration": running_duration,
@@ -2181,6 +2217,33 @@ def upload_video(
     db.commit()
     return redirect("/videos?message=Video%20berhasil%20di-upload%20dan%20siap%20dipakai.")
 
+
+@app.post("/videos/{video_id}/delete")
+def delete_video(
+    video_id: int,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    video = db.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
+    if not video:
+        return redirect(f"/videos?{urlencode({'error': 'Video was not found.'})}")
+    usage_count = db.execute("SELECT COUNT(*) FROM live_jobs WHERE video_id = ?", (video_id,)).fetchone()[0]
+    if usage_count:
+        return redirect(
+            f"/videos?{urlencode({'error': f'Video tidak bisa dihapus karena masih dipakai oleh Live Job ({usage_count} job).'})}"
+        )
+
+    video_path = Path(video["path"])
+    if not path_is_inside(video_path, VIDEO_DIR):
+        return redirect(f"/videos?{urlencode({'error': 'Video path is outside uploads/videos. Delete blocked for safety.'})}")
+    try:
+        if video_path.exists():
+            video_path.unlink()
+        db.execute("DELETE FROM videos WHERE id = ?", (video_id,))
+        db.commit()
+    except OSError as exc:
+        return redirect(f"/videos?{urlencode({'error': f'Could not delete video file: {exc}'})}")
+    return redirect(f"/videos?{urlencode({'message': 'Video deleted.'})}")
 
 @app.post("/jobs")
 def create_job(

@@ -20,20 +20,51 @@
 
   <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4 lg:col-span-2">
     <h3 class="text-base font-semibold">Uploaded Videos</h3>
-    <div class="mt-4 overflow-x-auto">
-      <table class="min-w-full divide-y divide-zinc-800 text-sm">
-        <thead class="text-left text-xs uppercase tracking-wide text-zinc-500">
-          <tr><th class="py-2 pr-4">File</th><th class="py-2 pr-4">Uploaded</th><th class="py-2">Stored name</th></tr>
+    <p class="mt-1 text-sm text-zinc-400">Video yang masih dipakai Live Job tidak bisa dihapus.</p>
+    <div class="mt-4 overflow-x-auto rounded-lg border border-zinc-800">
+      <table class="min-w-[860px] divide-y divide-zinc-800 text-sm">
+        <thead class="bg-zinc-950 text-left text-xs uppercase tracking-wide text-zinc-500">
+          <tr>
+            <th class="px-3 py-3">Filename</th>
+            <th class="px-3 py-3">File size</th>
+            <th class="px-3 py-3">Uploaded</th>
+            <th class="px-3 py-3">Usage</th>
+            <th class="px-3 py-3">Stored name</th>
+            <th class="px-3 py-3 text-right">Actions</th>
+          </tr>
         </thead>
         <tbody class="divide-y divide-zinc-800">
           {% for video in videos %}
-            <tr>
-              <td class="py-3 pr-4 font-medium">{{ video.original_name }}</td>
-              <td class="py-3 pr-4 text-zinc-400">{{ display_dt(video.uploaded_at) }}</td>
-              <td class="py-3 text-zinc-500">{{ video.filename }}</td>
+            <tr class="align-top hover:bg-zinc-950/60">
+              <td class="px-3 py-3 font-medium">
+                <div class="break-words">{{ video.original_name }}</div>
+                {% if not video.file_exists %}
+                  <div class="mt-1 rounded-md border border-red-900 bg-red-950 px-2 py-1 text-xs font-normal text-red-200">File video tidak ditemukan.</div>
+                {% endif %}
+              </td>
+              <td class="px-3 py-3 text-zinc-400">{{ video.file_size }}</td>
+              <td class="px-3 py-3 text-zinc-400">{{ display_dt(video.uploaded_at) }}</td>
+              <td class="px-3 py-3">
+                {% if video.is_used %}
+                  <span class="inline-flex rounded-full border border-amber-800 bg-amber-950 px-2 py-1 text-xs font-medium text-amber-200">used</span>
+                  <div class="mt-1 text-xs text-zinc-500">{{ video.live_job_count }} live jobs</div>
+                {% else %}
+                  <span class="inline-flex rounded-full border border-emerald-800 bg-emerald-950 px-2 py-1 text-xs font-medium text-emerald-200">unused</span>
+                {% endif %}
+              </td>
+              <td class="px-3 py-3 text-zinc-500"><div class="break-all">{{ video.filename }}</div></td>
+              <td class="px-3 py-3 text-right">
+                {% if video.is_used %}
+                  <button type="button" disabled title="Video masih dipakai Live Job" class="cursor-not-allowed rounded-md border border-zinc-800 px-3 py-2 text-xs font-medium text-zinc-600">Delete</button>
+                {% else %}
+                  <form method="post" action="/videos/{{ video.id }}/delete" onsubmit="return confirm('Delete this uploaded video? This will remove the file from uploads/videos and the database record.');">
+                    <button class="rounded-md border border-red-900 px-3 py-2 text-xs font-medium text-red-300 hover:bg-red-950">Delete</button>
+                  </form>
+                {% endif %}
+              </td>
             </tr>
           {% else %}
-            <tr><td colspan="3" class="py-6 text-center text-zinc-500">No uploaded videos yet.</td></tr>
+            <tr><td colspan="6" class="px-3 py-6 text-center text-zinc-500">No uploaded videos yet.</td></tr>
           {% endfor %}
         </tbody>
       </table>

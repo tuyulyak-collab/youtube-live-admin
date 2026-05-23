@@ -142,6 +142,31 @@ Never share stream keys publicly and do not commit stream keys to GitHub. Keep t
 
 Inactive channels stay in the database but are hidden from the Create Live Job dropdown. If a channel is already used by live jobs, deleting it will set it inactive instead of removing it, so existing jobs keep working and can still display their channel name.
 
+## Video Library
+
+The `Video Library` tab stores uploaded MP4 files in `uploads/videos` and tracks them in SQLite.
+
+Each uploaded video row shows:
+
+- original filename
+- stored filename
+- file size
+- upload date
+- usage status
+- delete action
+
+Videos that are used by one or more Live Jobs cannot be deleted from the Video Library. The app blocks deletion and shows:
+
+```text
+Video tidak bisa dihapus karena masih dipakai oleh Live Job.
+```
+
+The message includes the number of Live Jobs using the video when available. Delete or archive the related Live Jobs first if you want to remove an uploaded video.
+
+When a video is unused, deleting it removes both the physical file from `uploads/videos` and the SQLite `videos` record. The delete route validates that the stored path is inside `uploads/videos` before removing anything, so it cannot be used to delete arbitrary system files.
+
+If a Live Job points to a video file that is missing on disk, the Live Jobs table shows `File video tidak ditemukan.` and Start Live will fail until the file is restored or a new job is created with an available video.
+
 ## Audio Library And Playlists
 
 The Audio Library is global. Upload an audio file once, then reuse the same file in any number of channel playlists without duplicating the file on disk.
