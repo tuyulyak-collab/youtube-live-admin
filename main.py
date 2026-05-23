@@ -1,0 +1,663 @@
+import asyncio
+import os
+import re
+import secrets
+import shutil
+import signal
+import sqlite3
+import subprocess
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlencode
+
+from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
+
+
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / "data"
+VIDEO_DIR = BASE_DIR / "uploads" / "videos"
+LOG_DIR = BASE_DIR / "uploads" / "logs"
+DB_PATH = Path(os.getenv("DATABASE_PATH", DATA_DIR / "app.db"))
+
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+SESSION_SECRET = os.getenv("APP_SECRET_KEY") or os.getenv("SESSION_SECRET") or "change-this-local-dev-secret"
+
+YOUTUBE_RTMP_BASE = "rtmp://a.rtmp.youtube.com/live2"
+STATUSES = {"scheduled", "running", "stopped", "error"}
+
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+
+
+def local_now() -> datetime:
+    return datetime.now().replace(microsecond=0)
+
+
+def dt_to_str(value: datetime | None) -> str | None:
+    return value.isoformat(sep=" ") if value else None
+
+
+def parse_dt(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    return datetime.fromisoformat(value)
+
+
+def display_dt(value: str | None) -> str:
+    if not value:
+        return "-"
+    try:
+        return datetime.fromisoformat(value).strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return value
+
+
+def safe_filename(filename: str) -> str:
+    name = Path(filename).name
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")
+    return name or f"video_{int(local_now().timestamp())}.mp4"
+
+
+def mask_secret(value: str | None) -> str:
+    if not value:
+        return ""
+    if len(value) <= 8:
+        return "*" * len(value)
+    return f"{value[:4]}...{value[-4:]}"
+
+
+def mask_log(text: str, stream_key: str | None = None) -> str:
+    if stream_key:
+        text = text.replace(stream_key, mask_secret(stream_key))
+    text = re.sub(r"(live2/)([A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+)", r"\1****", text)
+    return text
+
+
+def ensure_directories() -> None:
+    for path in (DATA_DIR, VIDEO_DIR, LOG_DIR):
+        path.mkdir(parents=True, exist_ok=True)
+
+
+def connect_db() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db() -> None:
+    ensure_directories()
+    with connect_db() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS videos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                original_name TEXT NOT NULL,
+                path TEXT NOT NULL,
+                uploaded_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS live_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                live_name TEXT NOT NULL,
+                channel_name TEXT NOT NULL,
+                video_id INTEGER NOT NULL,
+                stream_key TEXT NOT NULL,
+                start_at TEXT,
+                end_at TEXT,
+                duration_minutes INTEGER,
+                status TEXT NOT NULL DEFAULT 'stopped',
+                pid INTEGER,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                started_at TEXT,
+                stopped_at TEXT,
+                last_error TEXT,
+                FOREIGN KEY(video_id) REFERENCES videos(id)
+            );
+            """
+        )
+
+
+def get_db():
+    conn = connect_db()
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def is_logged_in(request: Request) -> bool:
+    return bool(request.session.get("authenticated"))
+
+
+def require_admin(request: Request) -> None:
+    if not is_logged_in(request):
+        raise RedirectToLogin()
+
+
+class RedirectToLogin(Exception):
+    pass
+
+
+def redirect(url: str, status_code: int = 303) -> RedirectResponse:
+    return RedirectResponse(url, status_code=status_code)
+
+
+def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    return dict(row) if row else None
+
+
+def ffmpeg_path() -> str | None:
+    return shutil.which("ffmpeg")
+
+
+def process_exists(pid: int | None) -> bool:
+    if not pid:
+        return False
+    if os.name == "nt":
+        try:
+            result = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            return str(pid) in result.stdout and "No tasks" not in result.stdout
+        except Exception:
+            return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def stop_process(pid: int | None) -> tuple[bool, str]:
+    if not pid:
+        return True, "No PID was saved for this job."
+    if not process_exists(pid):
+        return True, "Process is already stopped."
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], check=True, capture_output=True, text=True)
+        else:
+            os.kill(pid, signal.SIGTERM)
+        return True, "FFmpeg process stopped."
+    except subprocess.CalledProcessError as exc:
+        return False, exc.stderr.strip() or exc.stdout.strip() or str(exc)
+    except Exception as exc:
+        return False, str(exc)
+
+
+def get_job(conn: sqlite3.Connection, job_id: int) -> dict[str, Any] | None:
+    row = conn.execute(
+        """
+        SELECT live_jobs.*, videos.filename AS video_filename, videos.path AS video_path,
+               videos.original_name AS video_original_name
+        FROM live_jobs
+        JOIN videos ON videos.id = live_jobs.video_id
+        WHERE live_jobs.id = ?
+        """,
+        (job_id,),
+    ).fetchone()
+    return row_to_dict(row)
+
+
+def get_stop_at(job: dict[str, Any]) -> datetime | None:
+    end_at = parse_dt(job.get("end_at"))
+    if end_at:
+        return end_at
+    duration = job.get("duration_minutes")
+    if not duration:
+        return None
+    start_point = parse_dt(job.get("started_at")) or parse_dt(job.get("start_at"))
+    if not start_point:
+        return None
+    return start_point + timedelta(minutes=int(duration))
+
+
+def log_path(job_id: int) -> Path:
+    return LOG_DIR / f"job_{job_id}.log"
+
+
+def latest_log_text(job_id: int, stream_key: str | None = None, max_chars: int = 6000) -> str:
+    path = log_path(job_id)
+    if not path.exists():
+        return "No FFmpeg log has been written for this job yet."
+    text = path.read_text(encoding="utf-8", errors="replace")
+    return mask_log(text[-max_chars:], stream_key).strip() or "The log file is empty."
+
+
+def latest_any_log(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    candidates = []
+    for path in LOG_DIR.glob("job_*.log"):
+        try:
+            job_id = int(path.stem.split("_", 1)[1])
+            candidates.append((path.stat().st_mtime, job_id))
+        except (IndexError, ValueError, OSError):
+            continue
+    if not candidates:
+        return None
+    _, job_id = max(candidates)
+    job = get_job(conn, job_id)
+    if not job:
+        return None
+    return {"job": job, "text": latest_log_text(job_id, job.get("stream_key"), 2500)}
+
+
+def start_job(conn: sqlite3.Connection, job_id: int) -> tuple[bool, str]:
+    job = get_job(conn, job_id)
+    now = dt_to_str(local_now())
+    if not job:
+        return False, "Live job was not found."
+    if job["status"] == "running" and process_exists(job.get("pid")):
+        return True, "Live job is already running."
+    if not ffmpeg_path():
+        message = "FFmpeg is not installed or is not available on PATH."
+        update_job_error(conn, job_id, message)
+        return False, message
+    video_path = Path(job["video_path"])
+    if not video_path.exists():
+        message = f"Selected video does not exist: {video_path}"
+        update_job_error(conn, job_id, message)
+        return False, message
+    if not job.get("stream_key"):
+        message = "Stream key is required."
+        update_job_error(conn, job_id, message)
+        return False, message
+
+    target = f"{YOUTUBE_RTMP_BASE}/{job['stream_key']}"
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "info",
+        "-re",
+        "-stream_loop",
+        "-1",
+        "-i",
+        str(video_path),
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-maxrate",
+        "4500k",
+        "-bufsize",
+        "9000k",
+        "-pix_fmt",
+        "yuv420p",
+        "-g",
+        "50",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-ar",
+        "44100",
+        "-f",
+        "flv",
+        target,
+    ]
+    flags = 0
+    if os.name == "nt":
+        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+    try:
+        with log_path(job_id).open("ab") as log_file:
+            log_file.write(f"\n\n[{now}] Starting FFmpeg for job {job_id}\n".encode("utf-8"))
+            process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                creationflags=flags,
+            )
+        conn.execute(
+            """
+            UPDATE live_jobs
+            SET status = 'running', pid = ?, started_at = ?, stopped_at = NULL,
+                last_error = NULL, updated_at = ?
+            WHERE id = ?
+            """,
+            (process.pid, now, now, job_id),
+        )
+        conn.commit()
+        return True, f"FFmpeg started with PID {process.pid}."
+    except Exception as exc:
+        message = f"Could not start FFmpeg: {exc}"
+        update_job_error(conn, job_id, message)
+        return False, message
+
+
+def stop_job(conn: sqlite3.Connection, job_id: int, status: str = "stopped") -> tuple[bool, str]:
+    job = get_job(conn, job_id)
+    now = dt_to_str(local_now())
+    if not job:
+        return False, "Live job was not found."
+    ok, message = stop_process(job.get("pid"))
+    if ok:
+        with log_path(job_id).open("ab") as log_file:
+            log_file.write(f"\n[{now}] {message}\n".encode("utf-8"))
+        conn.execute(
+            """
+            UPDATE live_jobs
+            SET status = ?, pid = NULL, stopped_at = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (status, now, now, job_id),
+        )
+        conn.commit()
+        return True, message
+    update_job_error(conn, job_id, message)
+    return False, message
+
+
+def update_job_error(conn: sqlite3.Connection, job_id: int, message: str) -> None:
+    now = dt_to_str(local_now())
+    conn.execute(
+        """
+        UPDATE live_jobs
+        SET status = 'error', pid = NULL, last_error = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (message, now, job_id),
+    )
+    conn.commit()
+
+
+async def scheduler_loop() -> None:
+    while True:
+        try:
+            run_scheduler_once()
+        except Exception:
+            pass
+        await asyncio.sleep(10)
+
+
+def run_scheduler_once() -> None:
+    now = local_now()
+    with connect_db() as conn:
+        jobs = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT live_jobs.*, videos.path AS video_path, videos.filename AS video_filename
+                FROM live_jobs
+                JOIN videos ON videos.id = live_jobs.video_id
+                WHERE status IN ('scheduled', 'running')
+                """
+            ).fetchall()
+        ]
+        for job in jobs:
+            job_id = int(job["id"])
+            status = job["status"]
+            if status == "running":
+                stop_at = get_stop_at(job)
+                if stop_at and now >= stop_at:
+                    stop_job(conn, job_id)
+                    continue
+                if job.get("pid") and not process_exists(job.get("pid")):
+                    update_job_error(conn, job_id, "FFmpeg process exited unexpectedly.")
+                continue
+
+            start_at = parse_dt(job.get("start_at"))
+            end_at = parse_dt(job.get("end_at"))
+            if end_at and now >= end_at:
+                conn.execute(
+                    """
+                    UPDATE live_jobs
+                    SET status = 'stopped', updated_at = ?, last_error = NULL
+                    WHERE id = ?
+                    """,
+                    (dt_to_str(now), job_id),
+                )
+                conn.commit()
+                continue
+            if start_at and now >= start_at:
+                start_job(conn, job_id)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    task = asyncio.create_task(scheduler_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+app = FastAPI(title="YouTube Live Streaming Manager", lifespan=lifespan)
+app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax", https_only=False)
+
+
+@app.exception_handler(RedirectToLogin)
+async def redirect_to_login_handler(request: Request, exc: RedirectToLogin) -> RedirectResponse:
+    return redirect("/login")
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, error: str | None = None):
+    if is_logged_in(request):
+        return redirect("/")
+    return templates.TemplateResponse("login.html", {"request": request, "error": error})
+
+
+@app.post("/login")
+def login(request: Request, username: str = Form(...), password: str = Form(...)):
+    valid_user = secrets.compare_digest(username, ADMIN_USERNAME)
+    valid_password = secrets.compare_digest(password, ADMIN_PASSWORD)
+    if valid_user and valid_password:
+        request.session["authenticated"] = True
+        request.session["username"] = username
+        return redirect("/")
+    return redirect("/login?error=Invalid%20username%20or%20password")
+
+
+@app.post("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return redirect("/login")
+
+
+@app.get("/", response_class=HTMLResponse)
+def dashboard(
+    request: Request,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+    message: str | None = None,
+    error: str | None = None,
+):
+    videos = [dict(row) for row in db.execute("SELECT * FROM videos ORDER BY uploaded_at DESC").fetchall()]
+    jobs = [
+        dict(row)
+        for row in db.execute(
+            """
+            SELECT live_jobs.*, videos.filename AS video_filename, videos.original_name AS video_original_name,
+                   videos.path AS video_path
+            FROM live_jobs
+            JOIN videos ON videos.id = live_jobs.video_id
+            ORDER BY live_jobs.created_at DESC
+            """
+        ).fetchall()
+    ]
+    totals = {
+        "videos": db.execute("SELECT COUNT(*) FROM videos").fetchone()[0],
+        "jobs": db.execute("SELECT COUNT(*) FROM live_jobs").fetchone()[0],
+        "running": db.execute("SELECT COUNT(*) FROM live_jobs WHERE status = 'running'").fetchone()[0],
+        "stopped": db.execute("SELECT COUNT(*) FROM live_jobs WHERE status = 'stopped'").fetchone()[0],
+        "error": db.execute("SELECT COUNT(*) FROM live_jobs WHERE status = 'error'").fetchone()[0],
+    }
+    warnings = []
+    if not ffmpeg_path():
+        warnings.append("FFmpeg is not installed or is not available on PATH. Start Live will not work until FFmpeg is installed.")
+    if ADMIN_USERNAME == "admin" and ADMIN_PASSWORD == "admin123":
+        warnings.append("Default admin credentials are active. Set ADMIN_USERNAME and ADMIN_PASSWORD before using this beyond local testing.")
+    for job in jobs:
+        if not Path(job["video_path"]).exists():
+            warnings.append(f"Video file missing for job '{job['live_name']}': {job['video_filename']}")
+    return templates.TemplateResponse(
+        "dashboard.html",
+        {
+            "request": request,
+            "videos": videos,
+            "jobs": jobs,
+            "totals": totals,
+            "warnings": warnings,
+            "message": message,
+            "error": error,
+            "latest_log": latest_any_log(db),
+            "display_dt": display_dt,
+            "mask_secret": mask_secret,
+        },
+    )
+
+
+@app.post("/videos")
+def upload_video(
+    request: Request,
+    file: UploadFile = File(...),
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    original_name = file.filename or ""
+    if not original_name.lower().endswith(".mp4"):
+        return redirect("/?error=Only%20MP4%20uploads%20are%20allowed")
+    filename = f"{local_now().strftime('%Y%m%d%H%M%S')}_{safe_filename(original_name)}"
+    target = VIDEO_DIR / filename
+    with target.open("wb") as output:
+        shutil.copyfileobj(file.file, output)
+    now = dt_to_str(local_now())
+    db.execute(
+        "INSERT INTO videos (filename, original_name, path, uploaded_at) VALUES (?, ?, ?, ?)",
+        (filename, original_name, str(target), now),
+    )
+    db.commit()
+    return redirect("/?message=Video%20uploaded")
+
+
+@app.post("/jobs")
+def create_job(
+    request: Request,
+    live_name: str = Form(...),
+    channel_name: str = Form(...),
+    video_id: int = Form(...),
+    stream_key: str = Form(...),
+    start_at: str | None = Form(None),
+    end_at: str | None = Form(None),
+    duration_minutes: str | None = Form(None),
+    status: str = Form("stopped"),
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    clean_live_name = live_name.strip()
+    clean_channel_name = channel_name.strip()
+    clean_stream_key = stream_key.strip()
+    if not clean_live_name or not clean_channel_name or not clean_stream_key:
+        return redirect("/?error=Live%20name,%20channel,%20and%20stream%20key%20are%20required")
+    if status not in STATUSES - {"running"}:
+        status = "stopped"
+    video = db.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
+    if not video:
+        return redirect("/?error=Selected%20video%20was%20not%20found")
+    if not Path(video["path"]).exists():
+        return redirect("/?error=Selected%20video%20file%20does%20not%20exist")
+    try:
+        start_value = parse_dt(start_at) if start_at else None
+        end_value = parse_dt(end_at) if end_at else None
+    except ValueError:
+        return redirect("/?error=Invalid%20date%20or%20time")
+    if start_value and end_value and end_value <= start_value:
+        return redirect("/?error=End%20datetime%20must%20be%20after%20start%20datetime")
+    duration_value = None
+    if duration_minutes:
+        try:
+            duration_value = int(duration_minutes)
+            if duration_value <= 0:
+                raise ValueError
+        except ValueError:
+            return redirect("/?error=Duration%20must%20be%20a%20positive%20number")
+    if start_value and status == "stopped":
+        status = "scheduled"
+
+    now = dt_to_str(local_now())
+    db.execute(
+        """
+        INSERT INTO live_jobs (
+            live_name, channel_name, video_id, stream_key, start_at, end_at,
+            duration_minutes, status, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            clean_live_name,
+            clean_channel_name,
+            video_id,
+            clean_stream_key,
+            dt_to_str(start_value),
+            dt_to_str(end_value),
+            duration_value,
+            status,
+            now,
+            now,
+        ),
+    )
+    db.commit()
+    return redirect("/?message=Live%20job%20created")
+
+
+@app.post("/jobs/{job_id}/start")
+def start_live(job_id: int, db: sqlite3.Connection = Depends(get_db), _: None = Depends(require_admin)):
+    ok, message = start_job(db, job_id)
+    key = "message" if ok else "error"
+    return redirect(f"/?{urlencode({key: message})}")
+
+
+@app.post("/jobs/{job_id}/stop")
+def stop_live(job_id: int, db: sqlite3.Connection = Depends(get_db), _: None = Depends(require_admin)):
+    ok, message = stop_job(db, job_id)
+    key = "message" if ok else "error"
+    return redirect(f"/?{urlencode({key: message})}")
+
+
+@app.get("/jobs/{job_id}/logs", response_class=HTMLResponse)
+def job_logs(
+    request: Request,
+    job_id: int,
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    job = get_job(db, job_id)
+    if not job:
+        return redirect("/?error=Live%20job%20was%20not%20found")
+    return templates.TemplateResponse(
+        "logs.html",
+        {
+            "request": request,
+            "job": job,
+            "log_text": latest_log_text(job_id, job.get("stream_key")),
+            "display_dt": display_dt,
+            "mask_secret": mask_secret,
+        },
+    )
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.head("/health")
+def health_head() -> Response:
+    return Response(status_code=200)

@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block body %}
+<header class="border-b border-zinc-200 bg-white">
+  <div class="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
+    <div>
+      <h1 class="text-lg font-semibold">Live Streaming Manager</h1>
+      <p class="text-sm text-zinc-600">Local FastAPI dashboard for YouTube RTMP jobs</p>
+    </div>
+    <form method="post" action="/logout">
+      <button class="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-50">Logout</button>
+    </form>
+  </div>
+</header>
+
+<main class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+  {% if message %}
+    <div class="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{{ message }}</div>
+  {% endif %}
+  {% if error %}
+    <div class="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{{ error }}</div>
+  {% endif %}
+  {% for warning in warnings %}
+    <div class="mb-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{{ warning }}</div>
+  {% endfor %}
+
+  <section class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+    <div class="rounded-lg border border-zinc-200 bg-white p-4">
+      <p class="text-sm text-zinc-600">Total videos</p>
+      <p class="mt-2 text-3xl font-semibold">{{ totals.videos }}</p>
+    </div>
+    <div class="rounded-lg border border-zinc-200 bg-white p-4">
+      <p class="text-sm text-zinc-600">Total live jobs</p>
+      <p class="mt-2 text-3xl font-semibold">{{ totals.jobs }}</p>
+    </div>
+    <div class="rounded-lg border border-zinc-200 bg-white p-4">
+      <p class="text-sm text-zinc-600">Running jobs</p>
+      <p class="mt-2 text-3xl font-semibold text-emerald-700">{{ totals.running }}</p>
+    </div>
+    <div class="rounded-lg border border-zinc-200 bg-white p-4">
+      <p class="text-sm text-zinc-600">Stopped jobs</p>
+      <p class="mt-2 text-3xl font-semibold">{{ totals.stopped }}</p>
+    </div>
+    <div class="rounded-lg border border-zinc-200 bg-white p-4">
+      <p class="text-sm text-zinc-600">Error jobs</p>
+      <p class="mt-2 text-3xl font-semibold text-red-700">{{ totals.error }}</p>
+    </div>
+  </section>
+
+  <section class="mt-6 grid gap-6 lg:grid-cols-3">
+    <div class="rounded-lg border border-zinc-200 bg-white p-4">
+      <h2 class="text-base font-semibold">Upload MP4</h2>
+      <form method="post" action="/videos" enctype="multipart/form-data" class="mt-4 space-y-4">
+        <label class="block">
+          <span class="text-sm font-medium">Video file</span>
+          <input name="file" type="file" accept="video/mp4,.mp4" required class="mt-1 block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-zinc-900 file:px-3 file:py-2 file:text-white">
+        </label>
+        <button class="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700">Upload video</button>
+      </form>
+    </div>
+
+    <div class="rounded-lg border border-zinc-200 bg-white p-4 lg:col-span-2">
+      <h2 class="text-base font-semibold">Create Live Job</h2>
+      <form method="post" action="/jobs" class="mt-4 grid gap-4 sm:grid-cols-2">
+        <label class="block">
+          <span class="text-sm font-medium">Live name</span>
+          <input name="live_name" required class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+        </label>
+        <label class="block">
+          <span class="text-sm font-medium">Channel name</span>
+          <input name="channel_name" required class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+        </label>
+        <label class="block sm:col-span-2">
+          <span class="text-sm font-medium">Video</span>
+          <select name="video_id" required class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+            {% for video in videos %}
+              <option value="{{ video.id }}">{{ video.original_name }}</option>
+            {% else %}
+              <option value="">Upload a video first</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="block sm:col-span-2">
+          <span class="text-sm font-medium">YouTube stream key</span>
+          <input name="stream_key" type="password" required autocomplete="off" class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+        </label>
+        <label class="block">
+          <span class="text-sm font-medium">Start datetime</span>
+          <input name="start_at" type="datetime-local" class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+        </label>
+        <label class="block">
+          <span class="text-sm font-medium">End datetime</span>
+          <input name="end_at" type="datetime-local" class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+        </label>
+        <label class="block">
+          <span class="text-sm font-medium">Duration minutes</span>
+          <input name="duration_minutes" type="number" min="1" class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+        </label>
+        <label class="block">
+          <span class="text-sm font-medium">Status</span>
+          <select name="status" class="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-800">
+            <option value="stopped">Stopped</option>
+            <option value="scheduled">Scheduled</option>
+          </select>
+        </label>
+        <div class="sm:col-span-2">
+          <button {% if not videos %}disabled{% endif %} class="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:bg-zinc-400">Create job</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section class="mt-6 rounded-lg border border-zinc-200 bg-white">
+    <div class="border-b border-zinc-200 px-4 py-3">
+      <h2 class="text-base font-semibold">Live Jobs</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-zinc-200 text-sm">
+        <thead class="bg-zinc-50 text-left text-xs uppercase tracking-wide text-zinc-600">
+          <tr>
+            <th class="px-4 py-3">Live</th>
+            <th class="px-4 py-3">Channel</th>
+            <th class="px-4 py-3">Video</th>
+            <th class="px-4 py-3">Status</th>
+            <th class="px-4 py-3">Schedule</th>
+            <th class="px-4 py-3">PID</th>
+            <th class="px-4 py-3 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-zinc-100">
+          {% for job in jobs %}
+            <tr>
+              <td class="px-4 py-3 font-medium">{{ job.live_name }}<div class="text-xs font-normal text-zinc-500">Key {{ mask_secret(job.stream_key) }}</div></td>
+              <td class="px-4 py-3">{{ job.channel_name }}</td>
+              <td class="px-4 py-3 max-w-xs truncate">{{ job.video_original_name }}</td>
+              <td class="px-4 py-3">
+                <span class="rounded-full px-2 py-1 text-xs font-medium
+                  {% if job.status == 'running' %}bg-emerald-100 text-emerald-800{% elif job.status == 'error' %}bg-red-100 text-red-800{% elif job.status == 'scheduled' %}bg-sky-100 text-sky-800{% else %}bg-zinc-100 text-zinc-700{% endif %}">
+                  {{ job.status }}
+                </span>
+                {% if job.last_error %}<div class="mt-1 max-w-xs text-xs text-red-700">{{ job.last_error }}</div>{% endif %}
+              </td>
+              <td class="px-4 py-3 text-xs text-zinc-600">
+                <div>Start: {{ display_dt(job.start_at) }}</div>
+                <div>End: {{ display_dt(job.end_at) }}</div>
+                <div>Duration: {{ job.duration_minutes or "-" }}</div>
+              </td>
+              <td class="px-4 py-3">{{ job.pid or "-" }}</td>
+              <td class="px-4 py-3">
+                <div class="flex justify-end gap-2">
+                  <form method="post" action="/jobs/{{ job.id }}/start">
+                    <button class="rounded-md bg-emerald-700 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-600">Start</button>
+                  </form>
+                  <form method="post" action="/jobs/{{ job.id }}/stop">
+                    <button class="rounded-md bg-red-700 px-3 py-2 text-xs font-medium text-white hover:bg-red-600">Stop</button>
+                  </form>
+                  <a href="/jobs/{{ job.id }}/logs" class="rounded-md border border-zinc-300 px-3 py-2 text-xs font-medium hover:bg-zinc-50">Logs</a>
+                </div>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="7" class="px-4 py-8 text-center text-zinc-500">No live jobs yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="mt-6 rounded-lg border border-zinc-200 bg-white">
+    <div class="border-b border-zinc-200 px-4 py-3">
+      <h2 class="text-base font-semibold">Latest FFmpeg Log</h2>
+    </div>
+    <div class="p-4">
+      {% if latest_log %}
+        <p class="mb-2 text-sm font-medium">{{ latest_log.job.live_name }}</p>
+        <pre class="max-h-80 overflow-auto rounded-md bg-zinc-950 p-4 text-xs leading-relaxed text-zinc-100">{{ latest_log.text }}</pre>
+      {% else %}
+        <p class="text-sm text-zinc-500">No FFmpeg logs yet.</p>
+      {% endif %}
+    </div>
+  </section>
+</main>
+{% endblock %}
