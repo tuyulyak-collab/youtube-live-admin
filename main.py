@@ -2,6 +2,7 @@ import asyncio
 import csv
 import io
 import os
+import platform
 import random
 import re
 import secrets
@@ -9,6 +10,8 @@ import shutil
 import signal
 import sqlite3
 import subprocess
+import sys
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -20,6 +23,11 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -28,6 +36,7 @@ AUDIO_DIR = BASE_DIR / "uploads" / "audio"
 READY_DIR = BASE_DIR / "uploads" / "ready"
 LOG_DIR = BASE_DIR / "uploads" / "logs"
 DB_PATH = Path(os.getenv("DATABASE_PATH", DATA_DIR / "app.db"))
+APP_STARTED_AT = time.time()
 
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
@@ -117,6 +126,30 @@ def format_runtime_seconds(seconds: float | int | None) -> str:
     if secs or not parts:
         parts.append(f"{secs} detik")
     return " ".join(parts)
+
+def format_bytes(num_bytes: float | int | None) -> str:
+    if num_bytes in (None, ""):
+        return "-"
+    try:
+        value = float(num_bytes)
+    except (TypeError, ValueError):
+        return "-"
+    units = ["B", "KB", "MB", "GB", "TB"]
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} {unit}"
+        value /= 1024
+
+def usage_bar_class(percent: float | int | None) -> str:
+    try:
+        value = float(percent)
+    except (TypeError, ValueError):
+        return "bg-zinc-700"
+    if value >= 90:
+        return "bg-red-500"
+    if value >= 80:
+        return "bg-amber-500"
+    return "bg-emerald-500"
 
 def job_runtime_seconds(job: dict[str, Any]) -> int | None:
     started_at = parse_dt(job.get("started_at"))
@@ -452,6 +485,138 @@ def ffprobe_probe(timeout: int = 5) -> dict[str, Any]:
     else:
         info["error"] = first_line or f"ffprobe -version exited with code {result.returncode}"
     return info
+
+def ffmpeg_processes(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    linked_rows = conn.execute(
+        """
+        SELECT id, live_name, pid
+        FROM live_jobs
+        WHERE status = 'running' AND pid IS NOT NULL
+        """
+    ).fetchall()
+    linked_by_pid = {int(row["pid"]): dict(row) for row in linked_rows if row["pid"]}
+    processes: list[dict[str, Any]] = []
+    if psutil is None:
+        return processes
+    for proc in psutil.process_iter(["pid", "name", "cmdline", "create_time"]):
+        try:
+            info = proc.info
+            name = info.get("name") or ""
+            cmdline_parts = info.get("cmdline") or []
+            cmdline = " ".join(str(part) for part in cmdline_parts)
+            if "ffmpeg" not in name.lower() and "ffmpeg" not in cmdline.lower():
+                continue
+            linked_job = linked_by_pid.get(int(info["pid"]))
+            processes.append(
+                {
+                    "pid": info["pid"],
+                    "name": name or "ffmpeg",
+                    "cmdline": cmdline,
+                    "started_at": dt_to_str(datetime.fromtimestamp(info["create_time"])) if info.get("create_time") else None,
+                    "linked_job_id": linked_job["id"] if linked_job else None,
+                    "linked_job_name": linked_job["live_name"] if linked_job else None,
+                }
+            )
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+    return sorted(processes, key=lambda item: int(item["pid"]))
+
+def system_monitor(conn: sqlite3.Connection) -> dict[str, Any]:
+    ffmpeg_info = ffmpeg_probe()
+    running_jobs = [
+        dict(row)
+        for row in conn.execute(
+            """
+            SELECT id, live_name, pid
+            FROM live_jobs
+            WHERE status = 'running'
+            ORDER BY id DESC
+            """
+        ).fetchall()
+    ]
+    info: dict[str, Any] = {
+        "psutil_available": psutil is not None,
+        "cpu_percent": None,
+        "ram_percent": None,
+        "ram_used": None,
+        "ram_total": None,
+        "disk_percent": None,
+        "disk_used": None,
+        "disk_total": None,
+        "app_uptime": format_runtime_seconds(time.time() - APP_STARTED_AT),
+        "server_time": display_dt_local(dt_to_str(local_now())),
+        "python_version": sys.version.split()[0],
+        "os_info": f"{platform.system()} {platform.release()} ({platform.machine()})",
+        "ffmpeg": ffmpeg_info,
+        "ffmpeg_processes": [],
+        "ffmpeg_process_count": 0,
+        "running_jobs": running_jobs,
+        "missing_running_jobs": [],
+        "warnings": [],
+    }
+    if psutil is not None:
+        try:
+            info["cpu_percent"] = psutil.cpu_percent(interval=0.1)
+            memory = psutil.virtual_memory()
+            disk = psutil.disk_usage(str(BASE_DIR.anchor or BASE_DIR))
+            info.update(
+                {
+                    "ram_percent": memory.percent,
+                    "ram_used": format_bytes(memory.used),
+                    "ram_total": format_bytes(memory.total),
+                    "disk_percent": disk.percent,
+                    "disk_used": format_bytes(disk.used),
+                    "disk_total": format_bytes(disk.total),
+                }
+            )
+        except Exception as exc:
+            info["warnings"].append(f"System usage stats are unavailable: {exc}")
+        processes = ffmpeg_processes(conn)
+        process_pids = {int(proc["pid"]) for proc in processes}
+        info["ffmpeg_processes"] = processes
+        info["ffmpeg_process_count"] = len(processes)
+        info["missing_running_jobs"] = [
+            job for job in running_jobs if job.get("pid") and int(job["pid"]) not in process_pids
+        ]
+    else:
+        info["warnings"].append("psutil is not installed. Install requirements to enable CPU, RAM, disk, and process monitoring.")
+
+    if info["cpu_percent"] is not None and info["cpu_percent"] >= 85:
+        info["warnings"].append("CPU usage is high. Starting more live jobs may cause dropped frames.")
+    if info["ram_percent"] is not None and info["ram_percent"] >= 85:
+        info["warnings"].append("RAM usage is high. Stop unused jobs or reduce workload before scaling.")
+    if info["disk_percent"] is not None and info["disk_percent"] >= 85:
+        info["warnings"].append("Disk usage is high. Clean old uploads, ready files, or logs before it fills up.")
+    if not ffmpeg_info.get("detected"):
+        info["warnings"].append("FFmpeg is not detected. Live start will not work until FFmpeg is available.")
+    if info["ffmpeg_process_count"] >= 10:
+        info["warnings"].append("Many FFmpeg processes are running. Check capacity before starting more streams.")
+    for job in info["missing_running_jobs"]:
+        info["warnings"].append(f"Live job marked running but FFmpeg process is not active: {job['live_name']} (PID {job.get('pid')}).")
+    return info
+
+def health_details(conn: sqlite3.Connection) -> dict[str, Any]:
+    monitor = system_monitor(conn)
+    database_ok = True
+    database_error = None
+    try:
+        conn.execute("SELECT 1").fetchone()
+    except Exception as exc:
+        database_ok = False
+        database_error = str(exc)
+    disk_warning = monitor["disk_percent"] is not None and monitor["disk_percent"] >= 85
+    return {
+        "app": "ok",
+        "database": "ok" if database_ok else "error",
+        "database_error": database_error,
+        "ffmpeg": "ok" if monitor["ffmpeg"].get("detected") else "error",
+        "disk_space": "warning" if disk_warning else "ok",
+        "active_jobs_count": len(monitor["running_jobs"]),
+        "ffmpeg_process_count": monitor["ffmpeg_process_count"],
+        "warnings": monitor["warnings"],
+        "server_time": monitor["server_time"],
+        "app_uptime": monitor["app_uptime"],
+    }
 
 def probe_audio_duration(path: Path) -> float | None:
     ffprobe_info = ffprobe_probe()
@@ -1740,6 +1905,8 @@ def admin_context(
     completed_jobs = [job for job in history_jobs if job.get("status") in FINAL_STATUSES]
     history_totals = history_summary(history_jobs)
     dashboard_history = dashboard_history_summary(db)
+    system_info = system_monitor(db)
+    warnings.extend(system_info["warnings"])
     return {
         "request": request,
         "nav_items": NAV_ITEMS,
@@ -1755,6 +1922,7 @@ def admin_context(
         "completed_jobs": completed_jobs,
         "history_totals": history_totals,
         "dashboard_history": dashboard_history,
+        "system_info": system_info,
         "channels": channels,
         "active_channels": active_channels,
         "audio_assets": audio_assets,
@@ -1772,6 +1940,7 @@ def admin_context(
         "format_duration_minutes": format_duration_minutes,
         "format_seconds": format_seconds,
         "format_runtime_seconds": format_runtime_seconds,
+        "usage_bar_class": usage_bar_class,
         "job_runtime_seconds": job_runtime_seconds,
         "running_duration": running_duration,
         "status_badge_class": status_badge_class,
@@ -2302,6 +2471,13 @@ def job_logs(
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
+
+@app.get("/health/details")
+def health_details_route(
+    db: sqlite3.Connection = Depends(get_db),
+    _: None = Depends(require_admin),
+) -> dict[str, Any]:
+    return health_details(db)
 
 @app.head("/health")
 def health_head() -> Response:

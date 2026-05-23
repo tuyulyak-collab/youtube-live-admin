@@ -119,7 +119,7 @@ The admin UI is split into tabs with a responsive dark dashboard layout:
 - `Scheduler`: scheduling mode explanation and scheduled jobs overview.
 - `History`: completed, stopped, failed, deleted, and archived live job records with filters, logs, duplicate-as-new, delete history record, and CSV export.
 - `Logs`: latest FFmpeg log and links to per-job logs.
-- `Settings`: app paths and FFmpeg diagnostics.
+- `Settings`: app paths, FFmpeg diagnostics, detailed System Monitor, and health details link.
 
 ## Channel Management
 
@@ -223,6 +223,48 @@ Bulk actions:
 Deleting live jobs from the Live Jobs tab now archives the job record to History instead of deleting the row immediately. It does not delete uploaded videos, uploaded audio, prepared playlists, or playlist records. Use the History tab delete action when you want to remove a history record from SQLite.
 
 The `queued` status is useful for preparing a group of jobs before starting them manually or letting scheduled queued jobs start later when their start datetime is reached.
+
+## System Monitor
+
+The dashboard and Settings tab include a lightweight System Monitor powered by `psutil`.
+
+It shows:
+
+- CPU usage percentage
+- RAM usage percentage and used / total memory
+- disk usage percentage and used / total disk space
+- running FFmpeg process count
+- app uptime
+- server local time
+- Python version
+- OS info
+- FFmpeg detected status, path, and version
+- FFmpeg PID list with live job links when a PID matches a running job in SQLite
+
+Install dependencies with:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+The monitor shows friendly warnings when:
+
+- CPU usage is high, which can cause stream lag or dropped frames.
+- RAM usage is high, which can make FFmpeg or the web app unstable.
+- disk usage is high, which can break uploads, ready audio files, logs, or SQLite writes.
+- FFmpeg is not detected, so live jobs cannot start.
+- many FFmpeg processes are running, which may exceed VPS capacity.
+- a live job is marked `running` but its FFmpeg PID is no longer active.
+
+Before scaling many live jobs, check CPU, RAM, disk, and FFmpeg process count from Dashboard or Settings. Start a small number of streams first, watch resource usage for several minutes, then increase gradually.
+
+The detailed health endpoint is available after login:
+
+```text
+http://127.0.0.1:8000/health/details
+```
+
+It reports app, database, FFmpeg, disk space, active jobs count, FFmpeg process count, and current warnings.
 
 ## History And Job Statuses
 

@@ -29,4 +29,115 @@
     </form>
   </div>
 </section>
+
+<section class="mt-6 space-y-6">
+  <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4" data-auto-refresh="30000">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h3 class="text-base font-semibold">System Monitor</h3>
+        <p class="mt-1 text-sm text-zinc-400">CPU, memory, disk, uptime, server info, and FFmpeg process status.</p>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <a href="/health/details" class="rounded-md border border-zinc-700 px-4 py-2 text-sm font-medium hover:bg-zinc-800">Health details</a>
+        <button type="button" onclick="window.location.reload()" class="rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400">Refresh</button>
+      </div>
+    </div>
+
+    <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+        <p class="text-sm text-zinc-400">CPU usage</p>
+        <p class="mt-2 text-3xl font-semibold">{{ system_info.cpu_percent if system_info.cpu_percent is not none else "-" }}{% if system_info.cpu_percent is not none %}%{% endif %}</p>
+        <div class="mt-3 h-2 rounded-full bg-zinc-800"><div class="h-2 rounded-full {{ usage_bar_class(system_info.cpu_percent) }}" style="width: {{ system_info.cpu_percent or 0 }}%"></div></div>
+      </div>
+      <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+        <p class="text-sm text-zinc-400">RAM usage</p>
+        <p class="mt-2 text-3xl font-semibold">{{ system_info.ram_percent if system_info.ram_percent is not none else "-" }}{% if system_info.ram_percent is not none %}%{% endif %}</p>
+        <p class="mt-1 text-xs text-zinc-500">{{ system_info.ram_used }} / {{ system_info.ram_total }}</p>
+        <div class="mt-3 h-2 rounded-full bg-zinc-800"><div class="h-2 rounded-full {{ usage_bar_class(system_info.ram_percent) }}" style="width: {{ system_info.ram_percent or 0 }}%"></div></div>
+      </div>
+      <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+        <p class="text-sm text-zinc-400">Disk usage</p>
+        <p class="mt-2 text-3xl font-semibold">{{ system_info.disk_percent if system_info.disk_percent is not none else "-" }}{% if system_info.disk_percent is not none %}%{% endif %}</p>
+        <p class="mt-1 text-xs text-zinc-500">{{ system_info.disk_used }} / {{ system_info.disk_total }}</p>
+        <div class="mt-3 h-2 rounded-full bg-zinc-800"><div class="h-2 rounded-full {{ usage_bar_class(system_info.disk_percent) }}" style="width: {{ system_info.disk_percent or 0 }}%"></div></div>
+      </div>
+      <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+        <p class="text-sm text-zinc-400">Running FFmpeg processes</p>
+        <p class="mt-2 text-3xl font-semibold">{{ system_info.ffmpeg_process_count }}</p>
+        <p class="mt-1 text-xs text-zinc-500">{{ system_info.running_jobs|length }} running jobs tracked</p>
+      </div>
+    </div>
+
+    <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+        <p class="text-sm text-zinc-400">App uptime</p>
+        <p class="mt-2 text-xl font-semibold">{{ system_info.app_uptime }}</p>
+      </div>
+      <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+        <p class="text-sm text-zinc-400">Server local time</p>
+        <p class="mt-2 text-xl font-semibold">{{ system_info.server_time }}</p>
+      </div>
+      <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+        <p class="text-sm text-zinc-400">Python version</p>
+        <p class="mt-2 text-xl font-semibold">{{ system_info.python_version }}</p>
+      </div>
+      <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+        <p class="text-sm text-zinc-400">OS info</p>
+        <p class="mt-2 break-words text-sm font-semibold">{{ system_info.os_info }}</p>
+      </div>
+    </div>
+
+    <div class="mt-4 rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+      <h4 class="text-sm font-semibold">FFmpeg Process Monitor</h4>
+      <div class="mt-4 overflow-x-auto">
+        <table class="min-w-full divide-y divide-zinc-800 text-sm">
+          <thead class="text-left text-xs uppercase tracking-wide text-zinc-500">
+            <tr>
+              <th class="py-2 pr-4">PID</th>
+              <th class="py-2 pr-4">Name</th>
+              <th class="py-2 pr-4">Linked live job</th>
+              <th class="py-2">Started at</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-zinc-800">
+            {% for process in system_info.ffmpeg_processes %}
+              <tr>
+                <td class="py-3 pr-4 font-medium">{{ process.pid }}</td>
+                <td class="py-3 pr-4">{{ process.name }}</td>
+                <td class="py-3 pr-4">
+                  {% if process.linked_job_id %}
+                    <a href="/jobs/{{ process.linked_job_id }}/logs" class="text-emerald-300 hover:text-emerald-200">{{ process.linked_job_name }}</a>
+                  {% else %}
+                    <span class="text-zinc-500">Not linked to a live job</span>
+                  {% endif %}
+                </td>
+                <td class="py-3 text-zinc-400">{{ display_dt(process.started_at) }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="4" class="py-6 text-center text-zinc-500">No FFmpeg processes detected.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {% if system_info.missing_running_jobs %}
+      <div class="mt-4 rounded-lg border border-red-900 bg-red-950 p-4">
+        <h4 class="text-sm font-semibold text-red-200">Missing FFmpeg processes</h4>
+        <div class="mt-3 space-y-2 text-sm text-red-100">
+          {% for job in system_info.missing_running_jobs %}
+            <p>Live job marked running but FFmpeg process is not active: {{ job.live_name }}{% if job.pid %} (PID {{ job.pid }}){% endif %}.</p>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</section>
+
+<script>
+  document.querySelectorAll("[data-auto-refresh]").forEach((element) => {
+    const delay = Number(element.dataset.autoRefresh || "0");
+    if (delay > 0) window.setTimeout(() => window.location.reload(), delay);
+  });
+</script>
 {% endblock %}
